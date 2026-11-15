@@ -1,8 +1,37 @@
 import json
+import os
 import os.path
 import tempfile
 import threading
+from pathlib import Path
 from timeit import default_timer as timer
+
+_CUDA_DLL_HANDLES = []
+
+
+def _register_voice_studio_cuda_dlls() -> None:
+    """Expose CUDA 12 / cuDNN 9 DLLs from voice_studio venv so ctranslate2 loads on Windows."""
+    if os.name != "nt":
+        return
+    try:
+        repo_root = Path(__file__).resolve().parents[3]
+    except IndexError:
+        return
+    torch_lib = repo_root / "voice_studio" / ".venv" / "Lib" / "site-packages" / "torch" / "lib"
+    if not torch_lib.is_dir():
+        return
+    torch_lib_str = str(torch_lib)
+    current_path = os.environ.get("PATH", "")
+    if torch_lib_str not in current_path.split(os.pathsep):
+        os.environ["PATH"] = f"{torch_lib_str}{os.pathsep}{current_path}"
+    if hasattr(os, "add_dll_directory"):
+        try:
+            _CUDA_DLL_HANDLES.append(os.add_dll_directory(torch_lib_str))
+        except OSError:
+            pass
+
+
+_register_voice_studio_cuda_dlls()
 
 try:
     from faster_whisper import WhisperModel

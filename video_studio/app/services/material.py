@@ -2426,6 +2426,27 @@ def download_videos(
         provider = "coverr"
         remote_search_videos = search_videos_coverr
 
+    if source in {"pexels", "pixabay", "coverr"}:
+        configured_keys = config.app.get(f"{source}_api_keys")
+        has_api_key = (
+            bool(configured_keys.strip())
+            if isinstance(configured_keys, str)
+            else any(bool(str(k or "").strip()) for k in (configured_keys or []))
+        )
+        if not has_api_key:
+            local_videos_dir = utils.storage_dir("local_videos", create=True)
+            local_mp4s = sorted(
+                os.path.join(local_videos_dir, name)
+                for name in os.listdir(local_videos_dir)
+                if name.lower().endswith(".mp4")
+                and os.path.isfile(os.path.join(local_videos_dir, name))
+            )
+            if local_mp4s:
+                logger.warning(
+                    f"no {source}_api_keys configured; falling back to {len(local_mp4s)} local .mp4 clip(s) from {local_videos_dir}"
+                )
+                return local_mp4s
+
     def search_videos(
         search_term: str,
         minimum_duration: int,

@@ -2125,13 +2125,23 @@ def render_image_zoom_video(
 def preprocess_video(
     materials: List[MaterialInfo], clip_duration=4, image_motion: ImageMotion = ImageMotion.zoom
 ):
-    # WebUI 在某些二次生成场景下可能传入空素材列表，这里直接返回空结果，避免抛出 NoneType 异常。
+    local_videos_dir = utils.storage_dir("local_videos", create=True)
     if not materials:
-        return []
+        auto_mp4s = sorted(
+            os.path.join(local_videos_dir, name)
+            for name in os.listdir(local_videos_dir)
+            if name.lower().endswith(".mp4")
+            and os.path.isfile(os.path.join(local_videos_dir, name))
+        )
+        if not auto_mp4s:
+            return []
+        logger.info(
+            f"auto-populated {len(auto_mp4s)} local .mp4 material(s) from {local_videos_dir}"
+        )
+        materials = [MaterialInfo(provider="local", url=p) for p in auto_mp4s]
 
     # 仅返回通过预处理校验的素材，避免低分辨率图片继续进入后续的视频合成流程。
     valid_materials = []
-    local_videos_dir = utils.storage_dir("local_videos", create=True)
 
     for material in materials:
         if not material.url:

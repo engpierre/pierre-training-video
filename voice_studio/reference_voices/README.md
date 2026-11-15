@@ -6,3 +6,4 @@ Drop your clean 10-second reference voice sample here (git-ignored for privacy a
 2. `pierre_ref.txt` — Exact verbatim UTF-8 transcript of the spoken words in `pierre_ref.wav`.
 
 Alternatively, record or upload directly inside **Tab 1** of the Gradio Voice Studio UI (`http://127.0.0.1:7860`).
+

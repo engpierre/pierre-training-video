@@ -41,3 +41,9 @@ voice_studio/outputs/*
 .DS_Store
 Thumbs.db
 *.log
+
+# Pipeline artifacts & browser auth session
+.tiktok_session/
+pipeline/output/*
+!pipeline/output/.gitkeep
+pipeline/latest_brief.json
