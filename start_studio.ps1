@@ -38,7 +38,7 @@ if (-not (Test-Path $WingetFfmpegBin)) {
         $WingetFfmpegBin = $FfmpegExe.DirectoryName
     }
 }
-if ((Test-Path $WingetFfmpegBin) -and ($env:PATH -split ";" | Where-Object { $_ -eq $WingetFfmpegBin }).Count -eq 0) {
+if ((Test-Path $WingetFfmpegBin) -and -not (($env:PATH -split ";") -contains $WingetFfmpegBin)) {
     $env:PATH = "$WingetFfmpegBin;$env:PATH"
 }
 
@@ -88,3 +88,4 @@ Write-Host ("Video Studio UI (Streamlit):   http://127.0.0.1:8501        (PID {0
 Write-Host ("Local Ollama LLM Backend:      http://127.0.0.1:11434/v1    (on-demand)" ) -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "Stop both windows when finished to release 100% of GPU 1 VRAM (0 MiB idle; zero auto-start)." -ForegroundColor Yellow
+
