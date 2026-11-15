@@ -545,7 +545,7 @@ api_route_model_name = ""
 # Ollama. Leave base_url empty to use the environment-aware local default.
 # Set model_name to a model installed by `ollama pull` or shown by `ollama list`.
 ollama_base_url = "http://127.0.0.1:11434/v1"
-ollama_model_name = "qwen3.8:27b"
+ollama_model_name = "qwen3.8-hardened:27b"
 
 # Claude Code (Claude Pro / Max / Team subscription).
 # Uses the locally installed, logged-in `claude` CLI in headless mode instead of

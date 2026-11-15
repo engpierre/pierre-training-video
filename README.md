@@ -9,7 +9,7 @@ Isolated local AI voice-cloning and short-form (`9:16` TikTok / `16:9` course) v
 | **Voice Studio UI** | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` (Gradio) | `cuda:1` (`bfloat16`, lazy load) | `http://127.0.0.1:7860` | Record/manage reference voice & synthesize clips |
 | **OpenAI TTS Shim** | FastAPI (`POST /v1/audio/speech`) | `cuda:1` (`bfloat16`, FFmpeg MP3/WAV) | `http://127.0.0.1:7861/v1/audio/speech` | Serves cloned narration to MoneyPrinterTurbo |
 | **Video Studio UI** | MoneyPrinterTurbo (Streamlit + MoviePy) | GPU 1 (`CUDA_VISIBLE_DEVICES=1`) for `faster-whisper` (`float16`) | `http://127.0.0.1:8501` | Script formatting, B-roll assembly, subtitles (`9:16` & `16:9`) |
-| **Script LLM** | Local Ollama (`qwen3.8:27b` default) | Local Ollama server | `http://127.0.0.1:11434/v1` | Zero-cost local script generation |
+| **Script LLM** | Local Ollama (`qwen3.8-hardened:27b` default) | Local Ollama server | `http://127.0.0.1:11434/v1` | Zero-cost local script generation |
 
 ## Directory Isolation
 
@@ -57,7 +57,8 @@ To shut down and return VRAM usage to **0 MiB**, simply close both console windo
 ## TikTok (`9:16`) & Course (`16:9`) Workflow
 
 1. Open **`http://127.0.0.1:8501`** in your browser.
-2. Confirm **LLM Provider** is `ollama` (`qwen3.8:27b` or another local `ollama list` model).
+2. Confirm **LLM Provider** is `ollama` (`qwen3.8-hardened:27b` or another local `ollama list` model).
 3. Under **Speech / TTS**, choose **`chatterbox`** and voice **`chatterbox:pierre-clone-Auto-Male`** (or `chatterbox:pierre-clone-en-Male` / `chatterbox:pierre-clone-fr-Male`).
 4. Under **Subtitles**, use **`whisper`** (`large-v3`, `cuda`, `float16`).
 5. Pick aspect ratio **`9:16`** (vertical TikTok/Shorts) or **`16:9`** (course modules) and generate.
+
