@@ -1,0 +1,43 @@
+# Virtual environments & Python caches
+.venv/
+**/.venv/
+venv/
+ENV/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment & local runtime configs (keep *.example*)
+.env
+.env.*
+!.env.example
+video_studio/config.toml
+
+# Local model weights & binaries
+*.pt
+*.pth
+*.safetensors
+*.bin
+*.onnx
+video_studio/resource/models/
+video_studio/resource/fonts/STHeiti*.ttc
+video_studio/storage/
+video_studio/logs/
+
+# Media & cloned voice artifacts
+*.wav
+*.mp3
+*.mp4
+*.flac
+*.ogg
+voice_studio/reference_voices/*
+!voice_studio/reference_voices/README.md
+!voice_studio/reference_voices/.gitkeep
+voice_studio/outputs/*
+!voice_studio/outputs/.gitkeep
+
+# OS & editor artifacts
+.DS_Store
+Thumbs.db
+*.log
