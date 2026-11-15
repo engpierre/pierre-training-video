@@ -40,6 +40,8 @@ QUANT_READER_SCRIPT = PIPELINE_DIR / "quant_reader.py"
 AUDIO_BUILDER_SCRIPT = PIPELINE_DIR / "audio_builder.py"
 RENDER_VIDEO_SCRIPT = PIPELINE_DIR / "render_video.py"
 TIKTOK_UPLOAD_SCRIPT = PIPELINE_DIR / "tiktok_upload.py"
+EMAIL_AGENT_PYTHON = Path(r"C:\Anti-Gravity-Core\pierres_email_agent\.venv\Scripts\python.exe")
+EMAIL_DISPATCH_SCRIPT = PIPELINE_DIR / "email_tiktok_package.py"
 
 WARROOM_COMPOSITE_PATH = ASSETS_DIR / "war_room_9x16_composite.png"
 WARROOM_BG_VIDEO_PATH = (
@@ -51,6 +53,7 @@ AUDIO_MANIFEST_PATH = OUTPUT_DIR / "audio_manifest.json"
 RENDER_MANIFEST_PATH = OUTPUT_DIR / "render_manifest.json"
 TIKTOK_PAYLOAD_PATH = OUTPUT_DIR / "tiktok_post_payload.json"
 TIKTOK_CAPTION_PATH = OUTPUT_DIR / "tiktok_caption.txt"
+EMAIL_DISPATCH_RECEIPT_PATH = OUTPUT_DIR / "email_dispatch_receipt.json"
 SUMMARY_PATH = OUTPUT_DIR / "pipeline_run_summary.json"
 
 
@@ -250,16 +253,31 @@ def run_pipeline(
             shutil.copy2(main_mp4, btc_copy)
             output_paths["tiktok_ready_btc_mp4"] = str(btc_copy)
 
-        # 5. Phase 5B TikTok Packager / Publisher
+        # 5. Phase 5B TikTok Packager / Publisher & Optional Proton Email Dispatch
+        tu_mode = "package-only" if upload_mode == "email" else upload_mode
         tu_cmd = [
             str(PYTHON_BIN),
             str(TIKTOK_UPLOAD_SCRIPT),
             "--mode",
-            upload_mode,
+            tu_mode,
         ]
         stage_timings["tiktok_upload"] = _run_stage(
             "tiktok_upload", tu_cmd, stage_env, timeout_sec=180
         )
+
+        if upload_mode == "email":
+            if not EMAIL_AGENT_PYTHON.exists():
+                raise FileNotFoundError(
+                    f"Expected Proton Email Agent Python missing: {EMAIL_AGENT_PYTHON}"
+                )
+            em_cmd = [
+                str(EMAIL_AGENT_PYTHON),
+                str(EMAIL_DISPATCH_SCRIPT),
+            ]
+            stage_timings["email_dispatch"] = _run_stage(
+                "email_dispatch", em_cmd, stage_env, timeout_sec=300
+            )
+            output_paths["email_dispatch_receipt_json"] = str(EMAIL_DISPATCH_RECEIPT_PATH)
     finally:
         more_pids = stop_voice_studio_server()
         for pid in more_pids:
@@ -334,9 +352,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--upload-mode",
-        choices=("package-only", "stage-draft", "publish"),
+        choices=("package-only", "email", "stage-draft", "publish"),
         default="package-only",
-        help="TikTok upload mode (default: package-only).",
+        help="TikTok upload/delivery mode: package-only, email (Proton Mail dispatch), stage-draft, or publish (default: package-only).",
     )
     parser.add_argument(
         "--rebuild-bg",

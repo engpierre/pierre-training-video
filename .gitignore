@@ -44,6 +44,8 @@ Thumbs.db
 
 # Pipeline artifacts & browser auth session
 .tiktok_session/
+.tiktok_nodes/
+pipeline/nodes_config.json
 pipeline/output/*
 !pipeline/output/.gitkeep
 pipeline/latest_brief.json
