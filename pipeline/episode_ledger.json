@@ -1,0 +1,29 @@
+{
+  "ledger_version": "1.0",
+  "last_updated_utc": "2026-11-15T12:00:00Z",
+  "active_episode_id": 2,
+  "episodes": [
+    {
+      "episode_id": 1,
+      "recorded_at_utc": "2026-11-15T12:00:00Z",
+      "date_badge": "15 NOV 2026",
+      "primary_ticker": "BTC-USD",
+      "radar_tickers": [
+        "BTC-USD"
+      ],
+      "calls": [
+        {
+          "ticker": "BTC-USD",
+          "entry_spot": 78208.91,
+          "atr_stop": 82493.62,
+          "target_16bar": 73924.20,
+          "directional_bias": "BEARISH",
+          "role": "MAIN_AUDIT"
+        }
+      ],
+      "receipt_graded": null,
+      "status": "LOCKED"
+    }
+  ]
+}
+

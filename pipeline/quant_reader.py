@@ -18,6 +18,8 @@ import re
 import sqlite3
 import sys
 from typing import Any
+import urllib.parse
+import urllib.request
 from zoneinfo import ZoneInfo
 
 WORKSPACE_ROOT = Path(r"C:\Anti-Gravity-Core")
@@ -368,6 +370,33 @@ def resolve_model_target_5d(
     return round(fallback, 2), "deterministic_atr_fallback"
 
 
+def fetch_live_market_spot(ticker: str) -> float | None:
+    """Fetches real-time market spot including pre-market / extended hours."""
+    clean = ticker.strip().upper().replace("$", "")
+    try:
+        url = (
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(clean)}"
+            f"?interval=1m&range=1d&includePrePost=true"
+        )
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0"},
+        )
+        with urllib.request.urlopen(req, timeout=4) as r:
+            d = json.loads(r.read().decode("utf-8"))
+            result = d.get("chart", {}).get("result", [{}])[0]
+            indicators = result.get("indicators", {}).get("quote", [{}])[0]
+            closes = [c for c in indicators.get("close", []) if c is not None]
+            if closes:
+                return round(float(closes[-1]), 2)
+            meta_price = result.get("meta", {}).get("regularMarketPrice")
+            if meta_price:
+                return round(float(meta_price), 2)
+    except Exception:
+        pass
+    return None
+
+
 def build_ticker_telemetry(
     ticker: str,
     ticket: dict[str, Any],
@@ -390,12 +419,18 @@ def build_ticker_telemetry(
     multiplier = HAIRCUT_MULTIPLIER if haircut_applied else 1.0
     adjusted_score = round(raw_score * multiplier, 2) if haircut_applied else raw_score
 
+    # Prioritize real-time live pre-market / extended hours feed
+    live_spot = fetch_live_market_spot(ticker)
     ticket_spot = float(ticket.get("spot_price") or 0.0)
     use_recon_primary = bool(recon_meta.get("spot_price")) and (
         ticket_spot <= 0.0
         or (ticker == "BTC-USD" and ticket_spot == 100.0)
     )
-    if use_recon_primary:
+
+    if live_spot is not None and live_spot > 0.0:
+        spot_raw = live_spot
+        atr_raw = float(recon_meta.get("atr_14") or ticket.get("atr_14") or 0.0)
+    elif use_recon_primary:
         spot_raw = float(recon_meta.get("spot_price") or 0.0)
         atr_raw = float(recon_meta.get("atr_14") or ticket.get("atr_14") or 0.0)
     else:

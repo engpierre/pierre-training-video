@@ -80,6 +80,8 @@ JULIE_STATUS_BOX = (455, 138, 972, 178)  # 517x40 inside julie_card top bar
 JULIE_EQ_BOX = (409, 608, 869, 664)  # 460x56 bottom bar inside julie_card
 
 LOWER_PANEL_BOX = (18, 1126, 1062, 1788)  # 1044x662 strictly below subtitles (860..1120) & above footer (1800..1920)
+RADAR_BANNER_BOX = (40, 140, 1040, 196)  # 1000x56 px at top >= 140px safe zone
+COMPLIANCE_WATERMARK_BOX = (40, 1550, 620, 1588)  # 580x38 px at bottom >= 320px safe zone (1588 <= 1600)
 STAGE2_SWEEP_DURATION_SEC = 0.30
 MAX_LINE_WIDTH_PX = 760
 WHISPER_MODEL_ID = "Systran/faster-whisper-base"
@@ -692,6 +694,68 @@ def build_top_badge_patch(
         anchor="lm",
     )
     return patch
+
+
+def build_3stock_radar_banner(
+    episode_id: int,
+    t1: str,
+    t2: str,
+    t3: str,
+    active_slot: int,
+    fonts: HudFonts,
+) -> Image.Image:
+    """Pre-renders Frame-0 3-Stock Radar Banner (1000x56) respecting top >= 140px safe zone."""
+    w = RADAR_BANNER_BOX[2] - RADAR_BANNER_BOX[0]  # 1000
+    h = RADAR_BANNER_BOX[3] - RADAR_BANNER_BOX[1]  # 56
+    banner = Image.new("RGBA", (w, h), (8, 16, 28, 235))
+    draw = ImageDraw.Draw(banner)
+    draw.rounded_rectangle((0, 0, w - 1, h - 1), radius=12, fill=(8, 16, 28, 235), outline=(0, 229, 255, 180), width=2)
+
+    # Left: Episode #XX | 3-STOCK RADAR:
+    draw.ellipse((16, 23, 26, 33), fill=(0, 229, 255))
+    header_text = f"EPISODE #{episode_id:02d} | 3-STOCK RADAR:"
+    draw.text((36, 28), header_text, font=fonts.bold(17), fill=(226, 244, 255), anchor="lm")
+
+    # Right: 3 Ticker Pills
+    pills = [
+        (1, f"${t1.lstrip('$')}", (480, 8, 630, 48)),
+        (2, f"${t2.lstrip('$')}", (645, 8, 795, 48)),
+        (3, f"${t3.lstrip('$')}", (810, 8, 985, 48)),
+    ]
+    for slot_idx, pill_text, (px0, py0, px1, py1) in pills:
+        is_active = (slot_idx == active_slot)
+        if is_active:
+            fill_col = (18, 48, 76, 255)
+            out_col = (0, 229, 255, 255) if slot_idx != 3 else (251, 191, 36, 255)
+            txt_col = (255, 255, 255, 255)
+            fnt = fonts.bold(16)
+            draw.rounded_rectangle((px0, py0, px1, py1), radius=8, fill=fill_col, outline=out_col, width=2)
+            draw.ellipse((px0 + 12, (py0 + py1) // 2 - 4, px0 + 20, (py0 + py1) // 2 + 4), fill=out_col)
+            draw.text(((px0 + px1) // 2 + 6, (py0 + py1) // 2), pill_text, font=fnt, fill=txt_col, anchor="mm")
+        else:
+            fill_col = (10, 18, 30, 200)
+            out_col = (32, 64, 92, 160)
+            txt_col = (148, 175, 200, 240)
+            fnt = fonts.medium(15)
+            draw.rounded_rectangle((px0, py0, px1, py1), radius=8, fill=fill_col, outline=out_col, width=1)
+            draw.text(((px0 + px1) // 2, (py0 + py1) // 2), pill_text, font=fnt, fill=txt_col, anchor="mm")
+
+    return banner
+
+
+def build_compliance_watermark(fonts: HudFonts) -> Image.Image:
+    """Pre-renders permanent bottom-left regulatory compliance badge (580x38)."""
+    w = COMPLIANCE_WATERMARK_BOX[2] - COMPLIANCE_WATERMARK_BOX[0]  # 580
+    h = COMPLIANCE_WATERMARK_BOX[3] - COMPLIANCE_WATERMARK_BOX[1]  # 38
+    badge = Image.new("RGBA", (w, h), (12, 16, 28, 230))
+    draw = ImageDraw.Draw(badge)
+    draw.rounded_rectangle((0, 0, w - 1, h - 1), radius=8, fill=(12, 16, 28, 230), outline=(239, 68, 68, 160), width=1)
+
+    # Caution indicator
+    draw.ellipse((14, h // 2 - 5, 24, h // 2 + 5), fill=(245, 158, 11))
+    watermark_text = "QUANT TELEMETRY LOG ONLY • NOT FINANCIAL ADVICE"
+    draw.text((32, h // 2), watermark_text, font=fonts.bold(13), fill=(226, 244, 255), anchor="lm")
+    return badge
 
 
 def build_ticker_assets(
@@ -1368,6 +1432,14 @@ def render_final_video(
     stage1_lower_card = build_stage1_lower_card(brief_data, hud_fonts)
     stage2_shell, stage2_rows = build_stage2_rows_and_shell(brief_data, hud_fonts)
 
+    ep_id = int(brief_data.get("episode_id", 2))
+    t2_ticker = str(brief_data.get("t2", {}).get("ticker", "T2")).upper()
+    t3_ticker = str(brief_data.get("t3", {}).get("ticker", "T3")).upper()
+    banner_s1 = build_3stock_radar_banner(ep_id, t1_ticker, t2_ticker, t3_ticker, 1, hud_fonts)
+    banner_s2 = build_3stock_radar_banner(ep_id, t1_ticker, t2_ticker, t3_ticker, 2, hud_fonts)
+    banner_s3 = build_3stock_radar_banner(ep_id, t1_ticker, t2_ticker, t3_ticker, 3, hud_fonts)
+    compliance_watermark = build_compliance_watermark(hud_fonts)
+
     bg_frames = decode_bg_loop_frames(
         ffmpeg_bin, bg_video_path, top_badge_patch, ticker_label_patch, subtitle_scrim
     )
@@ -1542,6 +1614,18 @@ def render_final_video(
                 composited = Image.alpha_composite(band_bg, card_bands[card_idx]).convert("RGB")
                 frame.paste(composited, (0, BAND_Y_TOP_PX))
 
+            # Layer 6: Frame-0 3-Stock Radar Banner (safe zone top >= 140px)
+            if t_sec < 11.0:
+                active_banner = banner_s1
+            elif t_sec < julie_start_sec:
+                active_banner = banner_s2
+            else:
+                active_banner = banner_s3
+            frame.paste(active_banner.convert("RGB"), (RADAR_BANNER_BOX[0], RADAR_BANNER_BOX[1]))
+
+            # Layer 7: Permanent Bottom-Left Compliance Watermark (safe zone bottom >= 320px)
+            frame.paste(compliance_watermark.convert("RGB"), (COMPLIANCE_WATERMARK_BOX[0], COMPLIANCE_WATERMARK_BOX[1]))
+
             proc.stdin.write(frame.tobytes())
     finally:
         proc.stdin.close()
@@ -1596,6 +1680,60 @@ def render_final_video(
     return manifest
 
 
+def render_verification_frame(
+    brief_path: Path,
+    output_path: Path,
+    slot: int = 1,
+) -> Path:
+    """Renders a single static verification frame (CPU-only, 0 MiB GPU compute)."""
+    with brief_path.open("r", encoding="utf-8") as handle:
+        brief_data = json.load(handle)
+    hud_fonts = HudFonts(bold_by_size={}, medium_by_size={}, mono_by_size={})
+
+    ep_id = int(brief_data.get("episode_id", 2))
+    t1_tk = str(brief_data.get("t1", {}).get("ticker", "ACM"))
+    t2_tk = str(brief_data.get("t2", {}).get("ticker", "NVO"))
+    t3_tk = str(brief_data.get("t3", {}).get("ticker", "UBER"))
+    run_date_badge = str(brief_data.get("run_date_badge", "LIVE"))
+
+    if WARROOM_SOURCE_IMAGE_PATH.exists():
+        with Image.open(WARROOM_SOURCE_IMAGE_PATH) as src_img:
+            frame = src_img.convert("RGB").resize((CANVAS_WIDTH, CANVAS_HEIGHT), Image.Resampling.LANCZOS)
+    else:
+        frame = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), (6, 11, 20))
+
+    top_badge_patch = build_top_badge_patch(run_date_badge, t1_tk, hud_fonts)
+    frame.paste(top_badge_patch, (HEADER_BADGE_MASK_BOX[0], HEADER_BADGE_MASK_BOX[1]))
+
+    ticker_label_patch, ticker_tile = build_ticker_assets(brief_data, hud_fonts)
+    frame.paste(ticker_label_patch, (0, TICKER_Y_TOP))
+    frame.paste(ticker_tile.crop((0, 0, TICKER_SCROLL_WIDTH, TICKER_HEIGHT)), (TICKER_LABEL_WIDTH, TICKER_Y_TOP))
+
+    banner = build_3stock_radar_banner(ep_id, t1_tk, t2_tk, t3_tk, slot, hud_fonts)
+    frame.paste(banner.convert("RGB"), (RADAR_BANNER_BOX[0], RADAR_BANNER_BOX[1]))
+
+    stage1_lower = build_stage1_lower_card(brief_data, hud_fonts)
+    frame.paste(stage1_lower, (LOWER_PANEL_BOX[0], LOWER_PANEL_BOX[1]))
+
+    watermark = build_compliance_watermark(hud_fonts)
+    frame.paste(watermark.convert("RGB"), (COMPLIANCE_WATERMARK_BOX[0], COMPLIANCE_WATERMARK_BOX[1]))
+
+    subtitle_scrim = build_subtitle_scrim()
+    band_bg = frame.crop((0, BAND_Y_TOP_PX, CANVAS_WIDTH, BAND_Y_TOP_PX + BAND_HEIGHT_PX)).convert("RGBA")
+    scrimmed = Image.alpha_composite(band_bg, subtitle_scrim).convert("RGB")
+    frame.paste(scrimmed, (0, BAND_Y_TOP_PX))
+
+    caption_font = hud_fonts.bold(FONT_SIZE_PX)
+    sample_text = f"AUDITING ${t1_tk} • ${t2_tk} • ${t3_tk}"
+    draw_cap = ImageDraw.Draw(frame)
+    draw_cap.text((CANVAS_WIDTH // 2, SUBTITLE_Y_CENTER_PX), sample_text, font=caption_font, fill=(255, 255, 255), anchor="mm")
+
+    resolved_out = output_path.resolve()
+    resolved_out.parent.mkdir(parents=True, exist_ok=True)
+    frame.save(resolved_out)
+    return resolved_out
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parses CLI flags for Phase 4 headless composite renderer."""
     parser = argparse.ArgumentParser(
@@ -1611,12 +1749,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=0.06,
         help="Subtle BGM mix level under mastered dialogue (0.0 disables BGM; default 0.06).",
     )
+    parser.add_argument(
+        "--test-frame",
+        type=Path,
+        default=None,
+        help="Render a single CPU-only HUD verification frame to this path and exit.",
+    )
+    parser.add_argument(
+        "--test-slot",
+        type=int,
+        default=1,
+        help="Active pill slot for test-frame (1, 2, or 3; default: 1).",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint."""
     args = parse_args(argv)
+    if args.test_frame is not None:
+        out_frame = render_verification_frame(
+            brief_path=args.brief.resolve(),
+            output_path=args.test_frame.resolve(),
+            slot=args.test_slot,
+        )
+        print(f"[render_video] Verification frame rendered (CPU-only): {out_frame}")
+        return 0
+
     manifest = render_final_video(
         brief_path=args.brief.resolve(),
         audio_path=args.audio.resolve(),

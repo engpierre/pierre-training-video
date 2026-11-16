@@ -28,6 +28,12 @@ import time
 from typing import Any
 
 from audio_builder import stop_voice_studio_server
+from episode_tracker import (
+    DEFAULT_LEDGER_PATH,
+    EpisodeRecord,
+    TickerCall,
+    commit_episode_record,
+)
 
 PROJECT_ROOT = Path(r"C:\Anti-Gravity-Core\pierre-training-video")
 PIPELINE_DIR = PROJECT_ROOT / "pipeline"
@@ -37,6 +43,8 @@ ASSETS_DIR = PROJECT_ROOT / "assets"
 PYTHON_BIN = PROJECT_ROOT / "video_studio" / ".venv" / "Scripts" / "python.exe"
 BUILD_BG_SCRIPT = PIPELINE_DIR / "build_warroom_bg.py"
 QUANT_READER_SCRIPT = PIPELINE_DIR / "quant_reader.py"
+EXTRACT_BRIEF_SCRIPT = PIPELINE_DIR / "extract_warroom_brief.py"
+GENERATE_SCRIPT_SCRIPT = PIPELINE_DIR / "generate_script.py"
 AUDIO_BUILDER_SCRIPT = PIPELINE_DIR / "audio_builder.py"
 RENDER_VIDEO_SCRIPT = PIPELINE_DIR / "render_video.py"
 TIKTOK_UPLOAD_SCRIPT = PIPELINE_DIR / "tiktok_upload.py"
@@ -173,6 +181,7 @@ def run_pipeline(
     max_duration: float,
     upload_mode: str,
     rebuild_bg: bool,
+    dry_run: bool = False,
 ) -> PipelineRunSummary:
     """Executes all Phase 1-5 stages cleanly and writes pipeline_run_summary.json."""
     if not PYTHON_BIN.exists():
@@ -200,13 +209,23 @@ def run_pipeline(
             stage_timings["bg_build"] = 0.0
             print("[orchestrator] --- Stage: bg_build skipped (cached assets verified)", flush=True)
 
-        # 2. Phase 2 Quant Reader (Read-Only DB + Dynamic Date)
-        qr_cmd = [str(PYTHON_BIN), str(QUANT_READER_SCRIPT)]
-        if ticker:
-            qr_cmd.extend(["--ticker", ticker])
-        if date_override:
-            qr_cmd.extend(["--date", date_override])
-        stage_timings["quant_reader"] = _run_stage("quant_reader", qr_cmd, stage_env, timeout_sec=60)
+        # 2. Phase 2 3-Stock Radar Brief & Script Generator (Read-Only DB)
+        if EXTRACT_BRIEF_SCRIPT.exists() and GENERATE_SCRIPT_SCRIPT.exists():
+            eb_cmd = [str(PYTHON_BIN), str(EXTRACT_BRIEF_SCRIPT)]
+            if ticker:
+                eb_cmd.extend(["--ticker", ticker])
+            t_eb = _run_stage("extract_warroom_brief", eb_cmd, stage_env, timeout_sec=60)
+
+            gs_cmd = [str(PYTHON_BIN), str(GENERATE_SCRIPT_SCRIPT)]
+            t_gs = _run_stage("generate_script", gs_cmd, stage_env, timeout_sec=60)
+            stage_timings["quant_reader"] = round(t_eb + t_gs, 3)
+        else:
+            qr_cmd = [str(PYTHON_BIN), str(QUANT_READER_SCRIPT)]
+            if ticker:
+                qr_cmd.extend(["--ticker", ticker])
+            if date_override:
+                qr_cmd.extend(["--date", date_override])
+            stage_timings["quant_reader"] = _run_stage("quant_reader", qr_cmd, stage_env, timeout_sec=60)
 
         # 3. Phase 3 Audio Builder + guaranteed tts_server teardown
         ab_cmd = [
@@ -318,6 +337,57 @@ def run_pipeline(
         json.dump(asdict(summary), handle, indent=2, ensure_ascii=False)
         handle.write("\n")
 
+    # 6. Append New 3-Stock Episode to episode_ledger.json
+    if not dry_run:
+        try:
+            ep_id = int(brief_data.get("episode_id", 0))
+            if ep_id > 0:
+                t1_d = brief_data.get("t1", {})
+                t2_d = brief_data.get("t2", {})
+                t3_d = brief_data.get("t3", {})
+                calls = (
+                    TickerCall(
+                        ticker=str(t1_d.get("ticker", "T1")),
+                        entry_spot=float(t1_d.get("spot_price", 0.0)),
+                        atr_stop=float(t1_d.get("dynamic_stop_2x_atr", 0.0)),
+                        target_16bar=float(t1_d.get("model_target_5d", 0.0)),
+                        directional_bias=str(t1_d.get("net_quant_bias", "BULLISH")),
+                        role="RADAR_1",
+                    ),
+                    TickerCall(
+                        ticker=str(t2_d.get("ticker", "T2")),
+                        entry_spot=float(t2_d.get("spot_price", 0.0)),
+                        atr_stop=float(t2_d.get("dynamic_stop_2x_atr", 0.0)),
+                        target_16bar=float(t2_d.get("model_target_5d", 0.0)),
+                        directional_bias=str(t2_d.get("net_quant_bias", "BULLISH")),
+                        role="RADAR_2",
+                    ),
+                    TickerCall(
+                        ticker=str(t3_d.get("ticker", "T3")),
+                        entry_spot=float(t3_d.get("spot_price", 0.0)),
+                        atr_stop=float(t3_d.get("dynamic_stop_2x_atr", 0.0)),
+                        target_16bar=float(t3_d.get("model_target_5d", 0.0)),
+                        directional_bias=str(t3_d.get("net_quant_bias", "BULLISH")),
+                        role="MAIN_AUDIT",
+                    ),
+                )
+                record = EpisodeRecord(
+                    episode_id=ep_id,
+                    recorded_at_utc=datetime.now(timezone.utc).isoformat(),
+                    date_badge=str(brief_data.get("run_date_badge", "")),
+                    primary_ticker=str(t3_d.get("ticker", "T3")),
+                    radar_tickers=(str(t1_d.get("ticker", "T1")), str(t2_d.get("ticker", "T2")), str(t3_d.get("ticker", "T3"))),
+                    calls=calls,
+                    receipt_graded=None,
+                    status="LOCKED",
+                )
+                commit_episode_record(record, DEFAULT_LEDGER_PATH)
+                print(f"[orchestrator] Committed Episode #{ep_id} to {DEFAULT_LEDGER_PATH}", flush=True)
+        except Exception as ep_exc:
+            print(f"[orchestrator] Warning: Ledger record commit skipped: {ep_exc}", file=sys.stderr)
+    else:
+        print("[orchestrator] DRY RUN: Episode record previewed; ledger not modified.", flush=True)
+
     return summary
 
 
@@ -361,6 +431,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Force regeneration of war_room_9x16.mp4 via build_warroom_bg.py.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview pipeline run without mutating the ledger or external services.",
+    )
     return parser.parse_args(argv)
 
 
@@ -374,6 +449,7 @@ def main(argv: list[str] | None = None) -> int:
         max_duration=max(0.0, float(args.max_duration)),
         upload_mode=str(args.upload_mode),
         rebuild_bg=bool(args.rebuild_bg),
+        dry_run=bool(args.dry_run),
     )
     gpu1_mib = summary.gpu_cleanup_status.get("gpus", {}).get("gpu1", {}).get("memory_used_mib", "?")
     gpu0_mib = summary.gpu_cleanup_status.get("gpus", {}).get("gpu0", {}).get("memory_used_mib", "?")
