@@ -1,49 +1,64 @@
 # Project Checkpoint: `pierre-training-video`
 
-**Status:** Saved & Cleanly Checkpointed (`email` production delivery verified; dual-node VPN browser system verified & parked).
+**Status:** Production Ready & Checkpointed (3-Stock Swarm Radar, Episodic Scorecard State Machine, and Automated Proton Mail Delivery Verified).
 
 ---
 
-## 1. Working Production Pipeline (`--upload-mode email`)
+## 1. Daily Morning Production SOP (2-Step Standard Operating Procedure)
 
-Single-command end-to-end daily briefing generator and Proton Mail delivery workflow:
+Every morning before market open, execute the automated 2-step workflow:
 
+### Step 1: Run War Room Pre-Market Scan
 ```powershell
+Set-Location 'C:\Anti-Gravity-Core\pierre_stock_warroom'
+python scripts\run_premarket_scan.py
+```
+*Refreshes dual-node spot prices, 20D SMAs, 14D ATR stops, and 16-bar TimesFM / Chronos-Bolt trajectories into `premarket_recon_output.json` and `chronos_intel_buffer.json`.*
+
+### Step 2: Run Master TikTok Pipeline (Auto-Extract Top 3 Swarm Stocks & Deliver)
+```powershell
+Set-Location 'C:\Anti-Gravity-Core\pierre-training-video'
 .\video_studio\.venv\Scripts\python.exe pipeline\run_daily_tiktok.py --upload-mode email
 ```
-
-Optional overrides (all strictly contained inside `C:\Anti-Gravity-Core\pierre-training-video\`):
-- `--ticker <SYMBOL>` (supports any of the 40 tracked assets in `portfolio_40.json` / `pierre_quant.db` / Vault Recons, e.g., `--ticker BTC-USD`)
-- `--date YYYY-MM-DD` (override `America/Toronto` runtime date badge)
-- `--max-duration 57.5` (transparent FFmpeg `atempo` target ceiling)
-- `--rebuild-bg` (force regeneration of cached 9:16 War Room background assets)
-
-### Stage Architecture (Phases 1–5D)
-1. **Phase 1 (`pipeline/build_warroom_bg.py`):** Builds `1080x1920` (9:16) dark War Room composite background & looping backdrop (`assets/war_room_9x16_composite.png`, `video_studio/storage/local_videos/war_room_9x16.mp4`).
-2. **Phase 2 (`pipeline/quant_reader.py`):** Reads `pierre_quant.db` (`?mode=ro`), `chronos_intel_buffer.json`, `portfolio_40.json`, and Obsidian Vault Recons to select `T1`, `T2`, `T3` and generate `pipeline/latest_brief.json` with a dynamic `America/Toronto` date badge.
-3. **Phase 3 (`pipeline/audio_builder.py`):** Generates dual-host cloned voices (Julie & Pierre) via `tts_server.py` pinned to `GPU 1` (`cuda:1`), applies transparent `< 60s` `atempo` guard, normalizes EBU R128 loudness (`master_dialogue.mp3`), and guarantees `tts_server.py` termination in `finally:` so `GPU 1` returns to `0 MiB`.
-4. **Phase 4 (`pipeline/render_video.py`):** Renders Option A/D hybrid animated HUD telemetry cards synced to Julie's handoff cue, composites hosts in the lower 9:16 frame, and burns `faster-whisper` forced-alignment captions (`GPU 1`) into `pipeline/output/tiktok_ready.mp4`.
-5. **Phase 5 (`pipeline/run_daily_tiktok.py`, `pipeline/tiktok_upload.py`, `pipeline/email_tiktok_package.py`):**
-   - Packages `tiktok_caption.txt` and `tiktok_post_payload.json` (`package-only`).
-   - In `--upload-mode email`, launches `pierres_email_agent\.venv\Scripts\python.exe` against `pipeline/email_tiktok_package.py` to dispatch `tiktok_ready.mp4` + caption over Proton Mail Web (`mail.proton.me`) from `<PROTON_SENDER>` to `<GMAIL_RECIPIENT>` using `.tiktok_session/proton_session` (reads `pierres_email_agent/.env` strictly read-only) and writes `pipeline/output/email_dispatch_receipt.json` (`SENT_VERIFIED`).
+*Executes the full automated pipeline:*
+1. **Fresh Swarm Ingestion (`extract_warroom_brief.py`):** Dynamically ranks the 40-asset universe from `premarket_recon_output.json` to select Slots #1 & #2 (Rapid Radar momentum setups) and Slot #3 (The Main Event anomaly/tension setup).
+2. **Ping-Pong Scripting (`generate_script.py`):** Generates 3-beat dialogue under the `57.5s` ceiling, grades prior episode's call, validates against compliance lexicon, and creates 4-line SEO caption.
+3. **Dual-Voice TTS Synthesis (`audio_builder.py`):** Neural audio generation on GPU 1 with EBU R128 loudness normalization (-14 to -16 LUFS) and guaranteed server teardown.
+4. **Broadcast HUD Rendering (`render_video.py`):** Renders vertical 1080x1920 video with Frame-0 3-Stock Radar Banner, active ticker highlight pill, and permanent bottom-left compliance watermark.
+5. **Episodic Ledger Lock (`episode_tracker.py`):** Automatically logs the 3-stock call into `pipeline/episode_ledger.json`.
+6. **Proton Mail Dispatch (`email_tiktok_package.py`):** Transmits MP4 video and caption directly to `engpierre5@gmail.com`.
 
 ---
 
-## 2. Parked Multi-Node VPN Setup (`pipeline/tiktok_nodes.py`)
+## 2. Command Line Overrides & Flags
 
-Multi-account isolated Chromium launcher provisioned and tunnel-verified (`nodes_tunnel_audit.json` recorded `all_assertions_passed: true`), currently shut down so no background browser processes or CDP ports (`9222`, `9223`) remain open:
-
-- **`node_alpha` (`127.0.0.1:9222`):** Isolated profile `.tiktok_nodes/node_alpha` paired with ProtonVPN extension (Canada - Montreal exit).
-- **`node_beta` (`127.0.0.1:9223`):** Isolated profile `.tiktok_nodes/node_beta` paired with ProtonVPN extension (Canada - Toronto exit).
-- **Isolation Controls:** `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`, isolated profile directories, distinct window placement/metadata, host Windows WAN untouched.
-- **Configuration & Secrets:** Runtime node emails live in git-ignored `pipeline/nodes_config.json` (or `TIKTOK_NODE_ALPHA_EMAIL` / `TIKTOK_NODE_BETA_EMAIL` environment variables); tracked code uses `example.com` defaults.
-- **Login UX:** Default TikTok target set to `https://www.tiktok.com/login/qrcode` for 1-scan mobile session transfer when resuming setup:
-  - Setup / Launch: `.\video_studio\.venv\Scripts\python.exe pipeline\tiktok_nodes.py --mode init-setup`
-  - 3-Way IP Audit: `.\video_studio\.venv\Scripts\python.exe pipeline\tiktok_nodes.py --mode verify-tunnels`
+- `--ticker <SYMBOL>`: Force a specific asset into Slot #3 as the Main Event (Slots #1 & #2 auto-filled with highest-scoring distinct tickers).
+- `--dry-run`: Previews extraction, dialogue, and metadata without modifying `episode_ledger.json` or running full render.
+- `--upload-mode <MODE>`: `package-only` (local package), `email` (Proton Mail dispatch to `engpierre5@gmail.com`), `stage-draft`, or `publish`.
+- `--max-duration 57.5`: Target duration ceiling enforced by transparent FFmpeg `atempo`.
+- `--bgm-volume 0.06`: Background music volume mix under dialogue.
 
 ---
 
-## 3. Non-Negotiable Isolation & Hygiene Guarantees
-- **Write Containment:** All pipeline writes, sessions, and temporary outputs remain inside `C:\Anti-Gravity-Core\pierre-training-video\`.
-- **Untouched External Subsystems:** `pierre_stock_warroom` (`:3888`), `.openclaw` daemons, `pierres_email_agent`, `pierre_quant.db`, and `chronos_intel_buffer.json` remain strictly read-only / unmodified.
-- **Hardware Isolation:** `GPU 0` (`cuda:0`) remains at `0 MiB` studio allocation; `GPU 1` (`cuda:1`) returns to `0 MiB` after audio/Whisper stages exit.
+## 3. Episodic Scorecard State Machine (`pipeline/episode_tracker.py`)
+
+- **Ledger Storage:** `pipeline/episode_ledger.json` persists every recorded episode, entry spot, 14D ATR stop, 16-bar target, and directional bias.
+- **Deterministic Grading:** `grade_previous_episode()` checks current market prices (via `pierre_quant.db ?mode=ro` or Yahoo chart API v8 fallback), computes exact delta percentage, and outputs spoken receipts and HUD badges.
+- **Production Seed:** Cleanly seeded with **Episode #01** (`BTC-USD` baseline) so the next live morning run registers as **Episode #02**.
+
+---
+
+## 4. Regulatory & Algorithmic Compliance Shield (CSA/AMF, SEC, TikTok Moderation)
+
+1. **Layer 1 (Visual Watermark):** Permanent HUD badge rendered in safe zone (`y: 1550px`): `QUANT TELEMETRY LOG ONLY • NOT FINANCIAL ADVICE`.
+2. **Layer 2 (Lexicon Filter):** Prohibits imperative advisory commands (`"buy now"`, `"sell now"`, `"you should"`, `"guaranteed"`).
+3. **Layer 3 (Spoken Sign-Off):** Closes every episode with `"strictly our quant telemetry, never financial advice"`.
+4. **Layer 4 (Caption Disclosure):** Appends `⚠️ Educational quant software telemetry & personal market log only. Not financial or investment advice.` to `tiktok_caption.txt`.
+
+---
+
+## 5. Non-Negotiable Isolation & Hardware Hygiene Guarantees
+
+- **Write Containment:** All video, audio, brief, and ledger writes remain strictly inside `C:\Anti-Gravity-Core\pierre-training-video\`.
+- **Untouched Subsystems:** `pierre_stock_warroom` (`:3888`), `.openclaw` daemons, `pierres_email_agent`, and `pierre_quant.db` remain strictly read-only.
+- **Hardware Isolation:** `GPU 0` (`cuda:0`) remains at `0 MiB` studio compute; `GPU 1` (`cuda:1`) returns to `0 MiB` immediately upon TTS/Whisper completion.
