@@ -53,8 +53,8 @@ EBUR128_TARGET_LRA = 11.0
 TARGET_MEAN_VOLUME_DB = -14.8
 ALIMITER_CEILING_LINEAR = 0.84  # ~ -1.51 dB headroom before LAME MP3 encoding
 DEFAULT_MAX_DURATION_SEC = 57.5
-MIN_ATEMPO = 1.00
-MAX_ATEMPO = 1.12
+MIN_ATEMPO = 1.04
+MAX_ATEMPO = 1.08
 
 SILENCEREMOVE_FILTER = (
     "silenceremove=start_periods=1:start_duration=0.05:start_threshold=-45dB:"
@@ -445,16 +445,13 @@ def normalize_individual_track(ffmpeg_bin: str, raw_wav: Path, norm_wav: Path) -
 
 
 def compute_tempo_factor(raw_concat_sec: float, max_duration: float) -> float:
-    """Computes transparent FFmpeg atempo multiplier to keep dialogue safely under max_duration."""
-    if max_duration <= 0.0 or raw_concat_sec <= max_duration:
-        return 1.0
+    """Computes transparent FFmpeg atempo multiplier (default 1.04x) to keep dialogue safely under max_duration."""
+    if max_duration <= 0.0 or (raw_concat_sec / MIN_ATEMPO) <= max_duration:
+        return MIN_ATEMPO
     target_safe_sec = max(1.0, max_duration - 0.15)
     factor = max(MIN_ATEMPO, round(raw_concat_sec / target_safe_sec, 4))
     if factor <= MAX_ATEMPO:
         return factor
-    # Allow up to 1.25x only if 1.12x still leaves total > max_duration
-    if raw_concat_sec / MAX_ATEMPO <= max_duration:
-        return MAX_ATEMPO
     return min(1.25, factor)
 
 

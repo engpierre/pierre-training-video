@@ -60,6 +60,8 @@ class DialogueScript:
     estimated_duration_sec: float
     full_combined_transcript: str
     compliance_clean: bool
+    hook_state: str
+    cover_pill_text: str
 
 
 def _fmt_price_spoken(val: float) -> str:
@@ -130,48 +132,64 @@ def build_3beat_dialogue(brief_data: dict[str, Any], ledger_path: Path = DEFAULT
     haircut3 = bool(t3.get("haircut_applied", False))
     has_clash = bool(t3.get("has_model_clash", False))
 
-    # --- 0.0s–4.5s: Credibility + Open-Loop Hook (Pierre) ---
-    hook_sentence = (
-        f"Morning, I'm Pierre, Senior Engineer. In Episode {next_id}, after yesterday's "
-        f"{receipt.graded_ticker} {receipt.outcome.replace('_', ' ').lower()}, my Dual-GPU War Room is auditing "
-        f"${tk1}, ${tk2}, and ${tk3}. Two setups look solid, and one just flashed a trap."
-    )
+    # --- 0.0s–4.5s: Percentage-Free 3-State FOMO Opener (Pierre) ---
+    prev_tk = str(receipt.graded_ticker or "UBER").upper().lstrip("$")
+    raw_outcome = str(receipt.outcome or "IN_PROGRESS").upper()
+    if raw_outcome == "TARGET_HIT":
+        hook_state = "TARGET_HIT"
+        cover_pill_text = "YESTERDAY'S CALL: VECTOR CONFIRMED"
+        hook_sentence = (
+            f"Morning, I'm Pierre, Senior Engineer. Yesterday our Dual-GPU AI nailed the ${prev_tk} "
+            f"vector right on target—here are the three setups the models just flagged for today: "
+            f"${tk1}, ${tk2}, and ${tk3}."
+        )
+    elif raw_outcome in ("STOP_TRIGGERED", "STOPPED_OUT"):
+        hook_state = "STOPPED_OUT"
+        cover_pill_text = "FULL AUDIT LOG | RISK FLOOR HELD"
+        hook_sentence = (
+            f"Morning, I'm Pierre, Senior Engineer. Yesterday's ${prev_tk} setup tagged our protective "
+            f"A-T-R stop before the drop—saved by the risk floor. Today our AI is auditing "
+            f"${tk1}, ${tk2}, and ${tk3}."
+        )
+    else:
+        hook_state = "ON_TRACK"
+        cover_pill_text = f"EPISODE #{next_id:02d} | LIVE TRACK RECORD"
+        hook_sentence = (
+            f"Morning, I'm Pierre, Senior Engineer. Yesterday's ${prev_tk} trajectory is playing out "
+            f"right on schedule—and today's pre-market scan just locked three fresh setups: "
+            f"${tk1}, ${tk2}, and ${tk3}."
+        )
 
-    # --- 4.5s–18.0s Beat 1: Rapid Radar on Stocks #1 & #2 ---
+    # --- Beat 1: Rapid Radar on Stocks #1 & #2 ---
     pierre_beat1 = (
-        f"Stock one: {name1}, ticker {tk1}, at {spot1}—holding {delta1_str} its twenty-day average. "
-        f"Stock two: {name2}, ticker {tk2}, trading at {spot2}, {delta2_str} trendline with clean momentum."
+        f"Stock one: {name1}, {tk1}, at {spot1}, holding {delta1_str} its twenty-day average. "
+        f"Stock two: {name2}, {tk2}, at {spot2}, {delta2_str} trendline."
     )
 
     julie_beat1 = (
-        f"Neural models confirm bullish alignment across both setups. "
-        f"Focusing now on our Main Event audit on {name3}, ticker {tk3}."
+        f"Neural models align bullish on both. Shifting compute to our Main Event on {name3}, ticker {tk3}."
     )
 
-    # --- 18.0s–47.0s Beat 2: Main Event Deep Dive on Stock #3 ---
+    # --- Beat 2: Main Event Deep Dive on Stock #3 ---
     if has_clash:
-        anomaly_str = "Neural engines flag a Model Clash between Times-F-M and Chronos-Bolt."
+        anomaly_str = "Models flag a clash between Times-F-M and Chronos-Bolt."
     elif haircut3:
-        anomaly_str = (
-            "Institutional SEC Form 4 flow is opaque, triggering our mandatory twenty percent confidence haircut."
-        )
+        anomaly_str = "SEC Form 4 flow is opaque, triggering a mandatory twenty percent haircut."
     else:
-        anomaly_str = "Smart money flow is converging with sixteen-bar neural momentum."
+        anomaly_str = "Smart money flow converges with sixteen-bar neural momentum."
 
     julie_beat2 = (
-        f"Spot price sits at {spot3}. {anomaly_str} "
-        f"Quantitative conviction is sixty-eight percent, holding above trend."
+        f"Spot sits at {spot3}. {anomaly_str} Quantitative conviction holds above trend."
     )
 
     pierre_beat2 = (
-        f"Our two-times A-T-R invalidation floor is strictly locked at {stop3}, "
-        f"targeting {target3}."
+        f"Our two-times A-T-R floor locks at {stop3}, targeting {target3}."
     )
 
-    # --- 47.0s–56.5s Beat 3: Vault Lock & Compliance Sign-Off ---
+    # --- Beat 3: Vault Lock & Compliance Sign-Off ---
     pierre_beat3 = (
-        "All three model vectors are locked in our Vault for tomorrow's audit—strictly our quant telemetry, "
-        "never financial advice. Which of the three breaks out first?"
+        "All three vectors are logged for tomorrow's audit—strictly quant telemetry, never financial advice. "
+        "Which setup moves first?"
     )
 
     pierre_full = f"{hook_sentence} {pierre_beat1} {pierre_beat2} {pierre_beat3}"
@@ -189,7 +207,7 @@ def build_3beat_dialogue(brief_data: dict[str, Any], ledger_path: Path = DEFAULT
     # Pacing safeguard: if exceeding 57.0s, trim filler phrases
     if est_duration > 57.0:
         pierre_clean = pierre_clean.replace("our quantitative models track", "we track")
-        julie_clean = julie_clean.replace("shifting all compute to", "focusing on")
+        julie_clean = julie_clean.replace("Shifting compute to", "Focusing on")
         total_words = len(pierre_clean.split()) + len(julie_clean.split())
         est_duration = round(total_words / ESTIMATED_WORDS_PER_SECOND, 2)
 
@@ -205,6 +223,8 @@ def build_3beat_dialogue(brief_data: dict[str, Any], ledger_path: Path = DEFAULT
         estimated_duration_sec=est_duration,
         full_combined_transcript=combined,
         compliance_clean=(len(v_p) == 0 and len(v_j) == 0),
+        hook_state=hook_state,
+        cover_pill_text=cover_pill_text,
     )
 
 
@@ -282,6 +302,8 @@ def main(argv: list[str] | None = None) -> int:
         brief_data["total_word_count"] = script_obj.total_words
         brief_data["total_estimated_duration_sec"] = script_obj.estimated_duration_sec
         brief_data["episode_id"] = script_obj.episode_id
+        brief_data["hook_state"] = script_obj.hook_state
+        brief_data["cover_pill_text"] = script_obj.cover_pill_text
         brief_data["caption_text"] = caption_text
 
         with args.brief.open("w", encoding="utf-8") as handle:

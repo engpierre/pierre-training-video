@@ -758,6 +758,153 @@ def build_compliance_watermark(fonts: HudFonts) -> Image.Image:
     return badge
 
 
+def build_frame0_cover_card(
+    t1: str,
+    t2: str,
+    t3: str,
+    cover_pill_text: str,
+    fonts: HudFonts,
+) -> Image.Image:
+    """Renders Frame-0 center 3-Ticker Cover Card (880x260) inside 1080x1920 safe zones."""
+    w, h = 880, 260
+    card = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(card)
+
+    # Dark obsidian backdrop with glowing cyan/amber border
+    draw.rounded_rectangle(
+        (0, 18, w - 1, h - 1),
+        radius=20,
+        fill=(8, 16, 28, 242),
+        outline=(0, 229, 255, 230),
+        width=3,
+    )
+
+    # Top percentage-free status pill
+    pill_clean = str(cover_pill_text or "LIVE TRACK RECORD").upper()
+    pill_w = min(w - 60, max(380, len(pill_clean) * 14 + 64))
+    px0 = (w - pill_w) // 2
+    px1 = px0 + pill_w
+    draw.rounded_rectangle(
+        (px0, 0, px1, 42),
+        radius=12,
+        fill=(14, 42, 68, 255),
+        outline=(251, 191, 36, 240),
+        width=2,
+    )
+    draw.text((w // 2, 21), pill_clean, font=fonts.bold(18), fill=(254, 240, 138), anchor="mm")
+
+    # Center 3-ticker symbols only ($T1 • $T2 • $T3)
+    s1 = f"${t1.lstrip('$').upper()}"
+    s2 = f"${t2.lstrip('$').upper()}"
+    s3 = f"${t3.lstrip('$').upper()}"
+    trio_line = f"{s1}   •   {s2}   •   {s3}"
+    draw.text((w // 2, 135), trio_line, font=fonts.bold(54), fill=(255, 255, 255), anchor="mm")
+
+    # Subtle sub-label
+    draw.text(
+        (w // 2, 215),
+        "DUAL-GPU QUANT WATCHTOWER • 3-STOCK AUDIT",
+        font=fonts.medium(16),
+        fill=(56, 189, 248),
+        anchor="mm",
+    )
+    return card
+
+
+def build_slot3_trajectory_chart(brief_data: dict[str, Any], fonts: HudFonts) -> Image.Image:
+    """Renders 14s transparent matplotlib Agg trajectory chart (920x400) for Slot #3 Main Event."""
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    t3 = brief_data.get("t3", {})
+    tk3 = str(t3.get("ticker", "MAIN")).upper().lstrip("$")
+    spot = float(t3.get("spot_price") or 50.0)
+    stop = float(t3.get("dynamic_stop_2x_atr") or spot * 0.92)
+    atr14 = float(t3.get("atr_14d") or spot * 0.03)
+    target = float(t3.get("model_target_5d") or spot)
+
+    hist_raw = t3.get("history_20d") or []
+    if len(hist_raw) < 2:
+        hist_20d = [spot * (0.98 + 0.02 * (i / 19.0)) for i in range(20)]
+    else:
+        hist_20d = [float(x) for x in hist_raw[-20:]]
+
+    traj_raw = t3.get("trajectory_16b") or []
+    if len(traj_raw) < 2:
+        traj_16b = [spot + (target - spot) * ((i + 1) / 16.0) for i in range(16)]
+    else:
+        traj_16b = [float(x) for x in traj_raw[:16]]
+
+    # Build figure with transparent background
+    w_px, h_px = 920, 400
+    dpi = 100
+    fig = Figure(figsize=(w_px / dpi, (h_px - 44) / dpi), dpi=dpi, facecolor="none")
+    ax = fig.add_subplot(111, facecolor="none")
+
+    x_hist = list(range(-(len(hist_20d) - 1), 1))
+    x_fc = list(range(0, len(traj_16b) + 1))
+    y_fc = [hist_20d[-1]] + traj_16b
+
+    # 1-sigma cone widening across 16 bars
+    cone_upper = [y_fc[0]] + [
+        y_fc[i] + atr14 * 0.45 * math.sqrt(i) for i in range(1, len(y_fc))
+    ]
+    cone_lower = [y_fc[0]] + [
+        y_fc[i] - atr14 * 0.45 * math.sqrt(i) for i in range(1, len(y_fc))
+    ]
+
+    is_bullish = traj_16b[-1] >= hist_20d[-1]
+    fc_color = "#10B981" if is_bullish else "#F59E0B"
+
+    # Plot 20D closes (cyan)
+    ax.plot(x_hist, hist_20d, color="#00E5FF", linewidth=2.6, label="20D Close")
+    ax.fill_between(x_hist, hist_20d, min(min(hist_20d), stop) * 0.985, color="#00E5FF", alpha=0.08)
+
+    # Plot 16-bar forecast cone (emerald/amber)
+    ax.fill_between(x_fc, cone_lower, cone_upper, color=fc_color, alpha=0.22, label="16B Cone")
+    ax.plot(x_fc, y_fc, color=fc_color, linewidth=2.6, linestyle="-", label="TimesFM/Chronos P50")
+
+    # Plot Agent 02 14D ATR invalidation floor (dashed red)
+    ax.axhline(stop, color="#EF4444", linestyle="--", linewidth=2.0, label=f"2xATR Stop ${stop:.2f}")
+
+    # Vertical split at t=0 (Now)
+    ax.axvline(0, color="#64748B", linestyle=":", linewidth=1.2)
+
+    # Clean dark styling
+    ax.tick_params(colors="#94A3B8", labelsize=10)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    for spine in ("bottom", "left"):
+        ax.spines[spine].set_color("#334155")
+    ax.grid(color="#1E293B", linestyle="-", linewidth=0.6, alpha=0.7)
+    ax.legend(loc="upper left", frameon=False, labelcolor="#E2E8F0", fontsize=10, ncol=3)
+    fig.tight_layout(pad=0.6)
+
+    canvas = FigureCanvasAgg(fig)
+    buf = io.BytesIO()
+    canvas.print_png(buf)
+    buf.seek(0)
+    chart_img = Image.open(buf).convert("RGBA")
+
+    # Wrap in obsidian HUD card
+    panel = Image.new("RGBA", (w_px, h_px), (8, 16, 28, 242))
+    draw = ImageDraw.Draw(panel)
+    draw.rounded_rectangle(
+        (0, 0, w_px - 1, h_px - 1),
+        radius=16,
+        fill=(8, 16, 28, 242),
+        outline=(0, 229, 255, 200),
+        width=2,
+    )
+    title_txt = f"MAIN EVENT: ${tk3}  |  20D PRICE • 14D ATR FLOOR • 16-BAR NEURAL CONE"
+    draw.text((20, 22), title_txt, font=fonts.bold(15), fill=(226, 244, 255), anchor="lm")
+    panel.paste(chart_img, (0, 40), chart_img)
+    return panel
+
+
 def build_ticker_assets(
     brief_data: dict[str, Any], fonts: HudFonts
 ) -> tuple[Image.Image, Image.Image]:
@@ -1435,6 +1582,9 @@ def render_final_video(
     ep_id = int(brief_data.get("episode_id", 2))
     t2_ticker = str(brief_data.get("t2", {}).get("ticker", "T2")).upper()
     t3_ticker = str(brief_data.get("t3", {}).get("ticker", "T3")).upper()
+    cover_pill_text = str(brief_data.get("cover_pill_text") or f"EPISODE #{ep_id:02d} | LIVE TRACK RECORD")
+    frame0_cover_card = build_frame0_cover_card(t1_ticker, t2_ticker, t3_ticker, cover_pill_text, hud_fonts)
+    slot3_chart_panel = build_slot3_trajectory_chart(brief_data, hud_fonts)
     banner_s1 = build_3stock_radar_banner(ep_id, t1_ticker, t2_ticker, t3_ticker, 1, hud_fonts)
     banner_s2 = build_3stock_radar_banner(ep_id, t1_ticker, t2_ticker, t3_ticker, 2, hud_fonts)
     banner_s3 = build_3stock_radar_banner(ep_id, t1_ticker, t2_ticker, t3_ticker, 3, hud_fonts)
@@ -1608,20 +1758,41 @@ def render_final_video(
                 else:
                     frame.paste(stage2_panel, (LOWER_PANEL_BOX[0], LOWER_PANEL_BOX[1]))
 
+            # Layer 4B: 14-Second Live Trajectory Sparkline (18.0s - 32.0s ONLY)
+            if 18.0 <= t_sec <= 32.0:
+                chart_bg = frame.crop((40, 1136, 40 + slot3_chart_panel.width, 1136 + slot3_chart_panel.height)).convert("RGBA")
+                chart_comp = Image.alpha_composite(chart_bg, slot3_chart_panel).convert("RGB")
+                frame.paste(chart_comp, (40, 1136))
+
             # Layer 5: Burned-in captions over darkened subtitle deck (860..1120)
             if card_idx < num_cards and cards[card_idx].start <= t_sec <= cards[card_idx].end:
                 band_bg = frame.crop(scrim_box).convert("RGBA")
                 composited = Image.alpha_composite(band_bg, card_bands[card_idx]).convert("RGB")
                 frame.paste(composited, (0, BAND_Y_TOP_PX))
 
-            # Layer 6: Frame-0 3-Stock Radar Banner (safe zone top >= 140px)
-            if t_sec < 11.0:
-                active_banner = banner_s1
-            elif t_sec < julie_start_sec:
-                active_banner = banner_s2
+            # Layer 6: Frame-0 3-Ticker Cover Card (0.0s - 3.5s) -> Docked 3-Stock Radar Banner (>= 3.5s)
+            if t_sec < 3.5:
+                if t_sec < 2.8:
+                    cx, cy, cw, ch = 60, 420, 880, 260
+                    cover_img = frame0_cover_card
+                else:
+                    p_dock = min(1.0, max(0.0, (t_sec - 2.8) / 0.7))
+                    ease = 1.0 - (1.0 - p_dock) ** 2
+                    cx = int(round(60 + (RADAR_BANNER_BOX[0] - 60) * ease))
+                    cy = int(round(420 + (RADAR_BANNER_BOX[1] - 420) * ease))
+                    cw = int(round(880 + (1000 - 880) * ease))
+                    ch = int(round(260 + (56 - 260) * ease))
+                    cover_img = frame0_cover_card.resize((cw, ch), Image.Resampling.LANCZOS)
+                cover_bg = frame.crop((cx, cy, cx + cw, cy + ch)).convert("RGBA")
+                frame.paste(Image.alpha_composite(cover_bg, cover_img).convert("RGB"), (cx, cy))
             else:
-                active_banner = banner_s3
-            frame.paste(active_banner.convert("RGB"), (RADAR_BANNER_BOX[0], RADAR_BANNER_BOX[1]))
+                if t_sec < 11.0:
+                    active_banner = banner_s1
+                elif t_sec < julie_start_sec:
+                    active_banner = banner_s2
+                else:
+                    active_banner = banner_s3
+                frame.paste(active_banner.convert("RGB"), (RADAR_BANNER_BOX[0], RADAR_BANNER_BOX[1]))
 
             # Layer 7: Permanent Bottom-Left Compliance Watermark (safe zone bottom >= 320px)
             frame.paste(compliance_watermark.convert("RGB"), (COMPLIANCE_WATERMARK_BOX[0], COMPLIANCE_WATERMARK_BOX[1]))

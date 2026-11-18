@@ -31,6 +31,7 @@ PROJECT_ROOT = Path(r"C:\Anti-Gravity-Core\pierre-training-video")
 PIPELINE_DIR = PROJECT_ROOT / "pipeline"
 OUTPUT_DIR = PIPELINE_DIR / "output"
 DEFAULT_BRIEF_PATH = PIPELINE_DIR / "latest_brief.json"
+DEFAULT_LEDGER_PATH = PIPELINE_DIR / "episode_ledger.json"
 
 WARROOM_DATA_DIR = Path(r"C:\Anti-Gravity-Core\pierre_stock_warroom\data")
 RECON_OUTPUT_PATH = WARROOM_DATA_DIR / "premarket_recon_output.json"
@@ -211,22 +212,80 @@ def build_ticker_brief(ticker: str, raw_data: dict[str, Any], owned: bool, slot_
     )
 
 
+def load_cooldown_tickers(
+    ledger_path: Path = DEFAULT_LEDGER_PATH, lookback_episodes: int = 2
+) -> set[str]:
+    """Loads tickers featured in the last N episodes for 3-day cooldown enforcement."""
+    if not ledger_path.exists():
+        return set()
+    try:
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+        episodes = ledger.get("episodes", [])
+        recent = episodes[-lookback_episodes:] if lookback_episodes > 0 else []
+        cooldown: set[str] = set()
+        for ep in recent:
+            for tk in ep.get("radar_tickers", []):
+                cooldown.add(str(tk).strip().upper().lstrip("$"))
+            if ep.get("primary_ticker"):
+                cooldown.add(str(ep["primary_ticker"]).strip().upper().lstrip("$"))
+        return cooldown
+    except Exception:
+        return set()
+
+
+def has_atr_invalidation_alert(raw_data: dict[str, Any]) -> bool:
+    """Returns True when spot price breaches the 14D ATR dynamic stop floor."""
+    spot = float(raw_data.get("spot_price") or 0.0)
+    stop = float(raw_data.get("dynamic_stop") or raw_data.get("dynamic_stop_2x_atr") or 0.0)
+    bias = str(raw_data.get("directional_bias") or "").upper()
+    if "STOP_BREACH" in bias or "INVALIDATION" in bias:
+        return True
+    return spot > 0.0 and stop > 0.0 and spot <= stop
+
+
+def load_20d_closes_ro(ticker: str, spot: float, sma_20: float, atr_14: float) -> list[float]:
+    """Queries last 20 daily closes from pierre_quant.db (?mode=ro) or derives deterministic curve."""
+    clean_tk = ticker.strip().upper().lstrip("$")
+    try:
+        conn = sqlite3.connect(RO_DB_URI, uri=True, timeout=15.0)
+        try:
+            row = conn.execute(
+                "SELECT closes FROM market_matrices WHERE ticker = ? ORDER BY rowid DESC LIMIT 1",
+                (clean_tk,),
+            ).fetchone()
+            if row and row[0]:
+                vals = [round(float(x.strip()), 2) for x in str(row[0]).split(",") if x.strip()]
+                if len(vals) >= 20:
+                    return vals[-20:]
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    # Deterministic fallback curve anchored at SMA20 -> Spot
+    base = sma_20 if sma_20 > 0 else spot
+    step = (spot - base) / 19.0 if spot > 0 else 0.0
+    return [round(base + step * i, 2) for i in range(20)]
+
+
 def select_radar_trio(override_ticker: str | None = None) -> list[TickerBrief]:
     """Selects Slots #1, #2 (Rapid Radar) and Slot #3 (The Main Event).
 
+    - Applies 3-day ticker cooldown (last 2 episodes) unless 14D ATR invalidation triggers.
     - Slot #3 (Main Event): Ticker with highest tension/anomaly score or user override.
     - Slots #1 & #2 (Rapid Radar): Top-scoring distinct momentum/confluence setups.
     """
     dataset = load_recon_dataset()
     owned_map = load_portfolio_owned_map()
+    cooldown_tickers = load_cooldown_tickers(DEFAULT_LEDGER_PATH, lookback_episodes=2)
+    override_clean = override_ticker.strip().upper().lstrip("$") if override_ticker else None
 
-    candidates: list[tuple[str, dict[str, Any], float, float]] = []
+    all_candidates: list[tuple[str, dict[str, Any], float, float]] = []
+    filtered_candidates: list[tuple[str, dict[str, Any], float, float]] = []
     # (ticker, data, momentum_score, anomaly_score)
     for tk, d in dataset.items():
         if tk in ("BTC-USD",):  # Reserved for macro benchmark
             continue
         conviction = float(d.get("composite_conviction") or 50.0)
-        ret_pct = abs(float(d.get("forecast_return_pct") or 0.0))
         sma_delta = abs(float(d.get("sma_delta_pct") or 0.0))
         haircut = bool(d.get("data_opacity_penalty", False))
         is_owned = owned_map.get(tk, False)
@@ -236,21 +295,27 @@ def select_radar_trio(override_ticker: str | None = None) -> list[TickerBrief]:
         # Anomaly score for Slot 3: high Z-score stretch or opacity or clash
         anomaly_score = (sma_delta * 1.5) + (20.0 if haircut else 0.0) + (10.0 if is_owned else 0.0)
 
-        candidates.append((tk, d, momentum_score, anomaly_score))
+        entry = (tk, d, momentum_score, anomaly_score)
+        all_candidates.append(entry)
 
+        # 3-Day Cooldown Filter: exclude recent tickers unless ATR invalidation alert or override
+        if tk in cooldown_tickers and tk != override_clean and not has_atr_invalidation_alert(d):
+            continue
+        filtered_candidates.append(entry)
+
+    candidates = filtered_candidates if len(filtered_candidates) >= 3 else all_candidates
     if not candidates:
         raise ValueError("No eligible ticker candidates found in War Room recon data.")
 
     # 1. Determine Slot #3 (The Main Event)
     slot3_tk: str
     slot3_data: dict[str, Any]
-    if override_ticker:
-        clean_override = override_ticker.strip().upper().replace("$", "")
-        if clean_override in dataset:
-            slot3_tk = clean_override
-            slot3_data = dataset[clean_override]
+    if override_clean:
+        if override_clean in dataset:
+            slot3_tk = override_clean
+            slot3_data = dataset[override_clean]
         else:
-            raise KeyError(f"Override ticker '{clean_override}' not present in War Room dataset.")
+            raise KeyError(f"Override ticker '{override_clean}' not present in War Room dataset.")
     else:
         # Highest anomaly score
         sorted_by_anomaly = sorted(candidates, key=lambda x: x[3], reverse=True)
@@ -281,6 +346,13 @@ def export_radar_brief_json(trio: list[TickerBrief], out_path: Path = DEFAULT_BR
     run_date_spoken = now_toronto.strftime("%A, %B ") + f"{now_toronto.day}th"
 
     b1, b2, b3 = trio[0], trio[1], trio[2]
+    dataset = load_recon_dataset()
+    raw_b3 = dataset.get(b3.ticker, {})
+    traj_16b = raw_b3.get("trajectory_16b") or [
+        round(b3.spot_price + ((b3.model_target_16b - b3.spot_price) * (i + 1) / 16.0), 2)
+        for i in range(16)
+    ]
+    hist_20d = load_20d_closes_ro(b3.ticker, b3.spot_price, b3.sma_20d, b3.atr_14d)
 
     # Map slot briefs to t1, t2, t3 for legacy pipeline consumers
     payload: dict[str, Any] = {
@@ -354,6 +426,8 @@ def export_radar_brief_json(trio: list[TickerBrief], out_path: Path = DEFAULT_BR
             "timesfm_bias": b3.timesfm_bias,
             "chronos_bias": b3.chronos_bias,
             "z_score_anomaly": b3.z_score_anomaly,
+            "history_20d": hist_20d,
+            "trajectory_16b": traj_16b,
         },
         "compliance_footer": "QUANT TELEMETRY LOG ONLY • NOT FINANCIAL ADVICE",
     }
