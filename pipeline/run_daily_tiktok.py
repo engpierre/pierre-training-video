@@ -292,6 +292,8 @@ def run_pipeline(
             em_cmd = [
                 str(EMAIL_AGENT_PYTHON),
                 str(EMAIL_DISPATCH_SCRIPT),
+                "--to-email",
+                "engpierre5@gmail.com",
             ]
             stage_timings["email_dispatch"] = _run_stage(
                 "email_dispatch", em_cmd, stage_env, timeout_sec=300

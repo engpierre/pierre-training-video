@@ -1,7 +1,7 @@
 {
   "ledger_version": "1.0",
-  "last_updated_utc": "2026-11-15T12:00:00Z",
-  "active_episode_id": 2,
+  "last_updated_utc": "2026-11-18T10:22:19.592215+00:00",
+  "active_episode_id": 3,
   "episodes": [
     {
       "episode_id": 1,
@@ -16,8 +16,86 @@
           "ticker": "BTC-USD",
           "entry_spot": 78208.91,
           "atr_stop": 82493.62,
-          "target_16bar": 73924.20,
+          "target_16bar": 73924.2,
           "directional_bias": "BEARISH",
+          "role": "MAIN_AUDIT"
+        }
+      ],
+      "receipt_graded": null,
+      "status": "LOCKED"
+    },
+    {
+      "episode_id": 2,
+      "recorded_at_utc": "2026-11-17T10:21:56.259156+00:00",
+      "date_badge": "17 NOV 2026",
+      "primary_ticker": "UBER",
+      "radar_tickers": [
+        "ACM",
+        "NVO",
+        "UBER"
+      ],
+      "calls": [
+        {
+          "ticker": "ACM",
+          "entry_spot": 72.5,
+          "atr_stop": 67.97,
+          "target_16bar": 80.56,
+          "directional_bias": "BULLISH_CONFLUENCE",
+          "role": "RADAR_1"
+        },
+        {
+          "ticker": "NVO",
+          "entry_spot": 41.6,
+          "atr_stop": 39.21,
+          "target_16bar": 44.15,
+          "directional_bias": "BULLISH_CONFLUENCE",
+          "role": "RADAR_2"
+        },
+        {
+          "ticker": "UBER",
+          "entry_spot": 69.99,
+          "atr_stop": 65.67,
+          "target_16bar": 70.71,
+          "directional_bias": "BULLISH_DRIFT",
+          "role": "MAIN_AUDIT"
+        }
+      ],
+      "receipt_graded": null,
+      "status": "LOCKED"
+    },
+    {
+      "episode_id": 3,
+      "recorded_at_utc": "2026-11-18T10:22:19.591213+00:00",
+      "date_badge": "18 NOV 2026",
+      "primary_ticker": "HIMS",
+      "radar_tickers": [
+        "ACM",
+        "NVO",
+        "HIMS"
+      ],
+      "calls": [
+        {
+          "ticker": "ACM",
+          "entry_spot": 80.53,
+          "atr_stop": 74.64,
+          "target_16bar": 96.7,
+          "directional_bias": "BULLISH_CONFLUENCE",
+          "role": "RADAR_1"
+        },
+        {
+          "ticker": "NVO",
+          "entry_spot": 40.7,
+          "atr_stop": 38.21,
+          "target_16bar": 42.23,
+          "directional_bias": "BULLISH_CONFLUENCE",
+          "role": "RADAR_2"
+        },
+        {
+          "ticker": "HIMS",
+          "entry_spot": 17.55,
+          "atr_stop": 12.88,
+          "target_16bar": 13.6,
+          "directional_bias": "BEARISH_BREAKDOWN",
           "role": "MAIN_AUDIT"
         }
       ],
@@ -26,4 +104,3 @@
     }
   ]
 }
-
