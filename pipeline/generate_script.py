@@ -49,6 +49,13 @@ PROHIBITED_TERMS_MAP: dict[str, str] = {
 }
 
 
+ROTATION_MODES: dict[int, str] = {
+    0: "catalyst_flow",
+    1: "trajectory_chart",
+    2: "trio_matrix",
+}
+
+
 @dataclass(slots=True, frozen=True)
 class DialogueScript:
     episode_id: int
@@ -62,6 +69,7 @@ class DialogueScript:
     compliance_clean: bool
     hook_state: str
     cover_pill_text: str
+    rotation_mode: str
 
 
 def _fmt_price_spoken(val: float) -> str:
@@ -131,8 +139,9 @@ def build_3beat_dialogue(brief_data: dict[str, Any], ledger_path: Path = DEFAULT
     target3 = _fmt_price_spoken(float(t3.get("model_target_5d", 0.0)))
     haircut3 = bool(t3.get("haircut_applied", False))
     has_clash = bool(t3.get("has_model_clash", False))
+    rotation_mode = str(brief_data.get("rotation_mode_override") or ROTATION_MODES[next_id % 3])
 
-    # --- 0.0s–4.5s: Percentage-Free 3-State FOMO Opener (Pierre) ---
+    # --- 0.0s–3.5s: Percentage-Free 3-State FOMO Opener (Pierre) ---
     prev_tk = str(receipt.graded_ticker or "UBER").upper().lstrip("$")
     raw_outcome = str(receipt.outcome or "IN_PROGRESS").upper()
     if raw_outcome == "TARGET_HIT":
@@ -166,11 +175,6 @@ def build_3beat_dialogue(brief_data: dict[str, Any], ledger_path: Path = DEFAULT
         f"Stock two: {name2}, {tk2}, at {spot2}, {delta2_str} trendline."
     )
 
-    julie_beat1 = (
-        f"Neural models align bullish on both. Shifting compute to our Main Event on {name3}, ticker {tk3}."
-    )
-
-    # --- Beat 2: Main Event Deep Dive on Stock #3 ---
     if has_clash:
         anomaly_str = "Models flag a clash between Times-F-M and Chronos-Bolt."
     elif haircut3:
@@ -178,13 +182,29 @@ def build_3beat_dialogue(brief_data: dict[str, Any], ledger_path: Path = DEFAULT
     else:
         anomaly_str = "Smart money flow converges with sixteen-bar neural momentum."
 
-    julie_beat2 = (
-        f"Spot sits at {spot3}. {anomaly_str} Quantitative conviction holds above trend."
-    )
-
-    pierre_beat2 = (
-        f"Our two-times A-T-R floor locks at {stop3}, targeting {target3}."
-    )
+    # --- Beat 2: Rotating Main Event Segment (~16s-38s) ---
+    if rotation_mode == "trio_matrix":
+        julie_beat1 = f"Pulling up our Trio Matrix across {tk1}, {tk2}, and {tk3}."
+        julie_beat2 = (
+            f"Agent zero-eight velocity and Agent zero-seven Z-scores flag {name3}, ticker {tk3}, "
+            f"at {spot3}. {anomaly_str}"
+        )
+        pierre_beat2 = f"Agent zero-two locks our fourteen-day A-T-R floor at {stop3}, targeting {target3}."
+    elif rotation_mode == "catalyst_flow":
+        julie_beat1 = (
+            f"Scanning Catalyst Flow across all three setups, focusing on {name3}, ticker {tk3}, at {spot3}."
+        )
+        julie_beat2 = f"{anomaly_str} Institutional and sector flow remain under active surveillance."
+        pierre_beat2 = (
+            f"With blindspots priced in, our fourteen-day A-T-R floor locks at {stop3}, targeting {target3}."
+        )
+    else:
+        julie_beat1 = (
+            f"Neural models align bullish on both. Shifting compute to our sixteen-bar trajectory chart "
+            f"on {name3}, ticker {tk3}."
+        )
+        julie_beat2 = f"Spot sits at {spot3}. {anomaly_str} The sixteen-bar cone projects toward {target3}."
+        pierre_beat2 = f"Our fourteen-day A-T-R floor locks at {stop3}, protecting the downside."
 
     # --- Beat 3: Vault Lock & Compliance Sign-Off ---
     pierre_beat3 = (
@@ -225,6 +245,7 @@ def build_3beat_dialogue(brief_data: dict[str, Any], ledger_path: Path = DEFAULT
         compliance_clean=(len(v_p) == 0 and len(v_j) == 0),
         hook_state=hook_state,
         cover_pill_text=cover_pill_text,
+        rotation_mode=rotation_mode,
     )
 
 
@@ -286,6 +307,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     print(f"[generate_script] === EPISODE #{script_obj.episode_id:02d} GENERATED SCRIPT ===")
+    print(f"  Rotation Mode: {script_obj.rotation_mode} | Hook State: {script_obj.hook_state}")
     print(f"  Duration Budget: {script_obj.estimated_duration_sec:.2f}s ({script_obj.total_words} words)")
     print(f"  Pierre Words: {script_obj.pierre_words} | Julie Words: {script_obj.julie_words}")
     print(f"  Compliance Lexicon: {'CLEAN (Zero imperative advisory terms)' if script_obj.compliance_clean else 'SANITIZED'}")
@@ -304,6 +326,7 @@ def main(argv: list[str] | None = None) -> int:
         brief_data["episode_id"] = script_obj.episode_id
         brief_data["hook_state"] = script_obj.hook_state
         brief_data["cover_pill_text"] = script_obj.cover_pill_text
+        brief_data["rotation_mode"] = script_obj.rotation_mode
         brief_data["caption_text"] = caption_text
 
         with args.brief.open("w", encoding="utf-8") as handle:

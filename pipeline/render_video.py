@@ -811,8 +811,69 @@ def build_frame0_cover_card(
     return card
 
 
-def build_slot3_trajectory_chart(brief_data: dict[str, Any], fonts: HudFonts) -> Image.Image:
-    """Renders 14s transparent matplotlib Agg trajectory chart (920x400) for Slot #3 Main Event."""
+ROTATING_MODES_MAP: dict[int, str] = {
+    0: "catalyst_flow",
+    1: "trajectory_chart",
+    2: "trio_matrix",
+}
+OPAQUE_SLATE_RGB = (11, 17, 26)  # #0b111a
+
+
+def _make_opaque_segment_canvas(
+    title_txt: str,
+    accent_rgb: tuple[int, int, int],
+    fonts: HudFonts,
+) -> tuple[Image.Image, ImageDraw.ImageDraw, tuple[int, int, int, int]]:
+    """Creates full LOWER_PANEL_BOX (1044x662) opaque #0b111a canvas with safe-zone inner card."""
+    panel_w = LOWER_PANEL_BOX[2] - LOWER_PANEL_BOX[0]  # 1044
+    panel_h = LOWER_PANEL_BOX[3] - LOWER_PANEL_BOX[1]  # 662
+    canvas = Image.new("RGBA", (panel_w, panel_h), (*OPAQUE_SLATE_RGB, 255))
+    draw = ImageDraw.Draw(canvas)
+
+    # Safe-zone inner card: x=22..938 (canvas x=40..956 <= 960), y=8..412 (canvas y=1134..1538 < 1550 watermark)
+    card_box = (22, 8, 938, 412)
+    draw.rounded_rectangle(
+        card_box,
+        radius=16,
+        fill=(*OPAQUE_SLATE_RGB, 255),
+        outline=(*accent_rgb, 215),
+        width=2,
+    )
+    draw.rectangle((card_box[0] + 16, card_box[1] + 10, card_box[0] + 22, card_box[1] + 34), fill=(*accent_rgb, 255))
+    draw.text((card_box[0] + 32, card_box[1] + 22), title_txt, font=fonts.bold(15), fill=(226, 244, 255), anchor="lm")
+    draw.line(
+        [(card_box[0] + 14, card_box[1] + 42), (card_box[2] - 14, card_box[1] + 42)],
+        fill=(30, 41, 59, 255),
+        width=1,
+    )
+    return canvas, draw, card_box
+
+
+def blend_panel_transition(
+    panel_from: Image.Image,
+    panel_to: Image.Image,
+    frac: float,
+    accent_rgb: tuple[int, int, int] = (0, 229, 255),
+) -> Image.Image:
+    """Smoothly cross-fades and wipes between two HUD cards across speaker/ticker turns."""
+    p = min(1.0, max(0.0, frac))
+    ease = p * p * (3.0 - 2.0 * p)
+    from_rgb = panel_from.convert("RGB")
+    to_rgb = panel_to.convert("RGB")
+    blended = Image.blend(from_rgb, to_rgb, ease)
+    if 0.02 < ease < 0.98:
+        w, h = blended.size
+        scan_x = max(2, min(w - 3, int(round(w * ease))))
+        draw = ImageDraw.Draw(blended)
+        draw.rectangle((max(0, scan_x - 6), 0, min(w - 1, scan_x + 2), h - 1), fill=accent_rgb)
+        draw.rectangle((max(0, scan_x - 1), 0, min(w - 1, scan_x + 1), h - 1), fill=(236, 254, 255))
+    return blended
+
+
+def build_progressive_trajectory_layers(
+    brief_data: dict[str, Any], fonts: HudFonts
+) -> tuple[Image.Image, Image.Image, tuple[int, int, int, int]]:
+    """Pre-renders fixed-axis base & full-curve #0b111a chart panels for 30fps progressive draw-in."""
     import io
     import matplotlib
     matplotlib.use("Agg")
@@ -838,71 +899,237 @@ def build_slot3_trajectory_chart(brief_data: dict[str, Any], fonts: HudFonts) ->
     else:
         traj_16b = [float(x) for x in traj_raw[:16]]
 
-    # Build figure with transparent background
-    w_px, h_px = 920, 400
-    dpi = 100
-    fig = Figure(figsize=(w_px / dpi, (h_px - 44) / dpi), dpi=dpi, facecolor="none")
-    ax = fig.add_subplot(111, facecolor="none")
-
     x_hist = list(range(-(len(hist_20d) - 1), 1))
     x_fc = list(range(0, len(traj_16b) + 1))
     y_fc = [hist_20d[-1]] + traj_16b
+    cone_upper = [y_fc[0]] + [y_fc[i] + atr14 * 0.45 * math.sqrt(i) for i in range(1, len(y_fc))]
+    cone_lower = [y_fc[0]] + [y_fc[i] - atr14 * 0.45 * math.sqrt(i) for i in range(1, len(y_fc))]
 
-    # 1-sigma cone widening across 16 bars
-    cone_upper = [y_fc[0]] + [
-        y_fc[i] + atr14 * 0.45 * math.sqrt(i) for i in range(1, len(y_fc))
-    ]
-    cone_lower = [y_fc[0]] + [
-        y_fc[i] - atr14 * 0.45 * math.sqrt(i) for i in range(1, len(y_fc))
-    ]
+    all_y = hist_20d + [stop] + cone_upper + cone_lower
+    raw_min, raw_max = min(all_y), max(all_y)
+    pad = max(0.5, (raw_max - raw_min) * 0.14)
+    y_min, y_max = raw_min - pad, raw_max + pad
 
     is_bullish = traj_16b[-1] >= hist_20d[-1]
     fc_color = "#10B981" if is_bullish else "#F59E0B"
+    chart_w, chart_h = 892, 344
+    dpi = 100
 
-    # Plot 20D closes (cyan)
-    ax.plot(x_hist, hist_20d, color="#00E5FF", linewidth=2.6, label="20D Close")
-    ax.fill_between(x_hist, hist_20d, min(min(hist_20d), stop) * 0.985, color="#00E5FF", alpha=0.08)
+    def _render_fig(show_curves: bool) -> Image.Image:
+        fig = Figure(figsize=(chart_w / dpi, chart_h / dpi), dpi=dpi, facecolor="#0b111a")
+        ax = fig.add_subplot(111, facecolor="#0b111a")
+        line_alpha = 1.0 if show_curves else 0.0
+        fill_hist_alpha = 0.10 if show_curves else 0.0
+        cone_alpha = 0.22 if show_curves else 0.0
 
-    # Plot 16-bar forecast cone (emerald/amber)
-    ax.fill_between(x_fc, cone_lower, cone_upper, color=fc_color, alpha=0.22, label="16B Cone")
-    ax.plot(x_fc, y_fc, color=fc_color, linewidth=2.6, linestyle="-", label="TimesFM/Chronos P50")
+        ax.plot(x_hist, hist_20d, color="#00E5FF", linewidth=2.6, alpha=line_alpha, label="20D PRICE")
+        ax.fill_between(x_hist, hist_20d, y_min, color="#00E5FF", alpha=fill_hist_alpha)
+        ax.fill_between(x_fc, cone_lower, cone_upper, color=fc_color, alpha=cone_alpha, label="16-BAR CONE")
+        ax.plot(x_fc, y_fc, color=fc_color, linewidth=2.6, linestyle="-", alpha=line_alpha, label="16-BAR P50")
+        ax.axhline(stop, color="#EF4444", linestyle="--", linewidth=2.0, alpha=line_alpha, label=f"14D ATR FLOOR ${stop:.2f}")
+        ax.axvline(0, color="#64748B", linestyle=":", linewidth=1.2)
 
-    # Plot Agent 02 14D ATR invalidation floor (dashed red)
-    ax.axhline(stop, color="#EF4444", linestyle="--", linewidth=2.0, label=f"2xATR Stop ${stop:.2f}")
+        ax.set_xlim(x_hist[0] - 0.5, x_fc[-1] + 0.5)
+        ax.set_ylim(y_min, y_max)
+        ax.tick_params(colors="#CBD5E1", labelsize=10)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        for spine in ("bottom", "left"):
+            ax.spines[spine].set_color("#334155")
+        ax.grid(color="#1E293B", linestyle="-", linewidth=0.7, alpha=0.85)
+        leg = ax.legend(loc="upper left", frameon=False, labelcolor="#F1F5F9", fontsize=10, ncol=2)
+        for handle in leg.legend_handles:
+            try:
+                handle.set_alpha(1.0)
+            except Exception:
+                pass
+        fig.tight_layout(pad=0.6)
 
-    # Vertical split at t=0 (Now)
-    ax.axvline(0, color="#64748B", linestyle=":", linewidth=1.2)
+        canvas_agg = FigureCanvasAgg(fig)
+        buf = io.BytesIO()
+        canvas_agg.print_png(buf)
+        buf.seek(0)
+        return Image.open(buf).convert("RGBA")
 
-    # Clean dark styling
-    ax.tick_params(colors="#94A3B8", labelsize=10)
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-    for spine in ("bottom", "left"):
-        ax.spines[spine].set_color("#334155")
-    ax.grid(color="#1E293B", linestyle="-", linewidth=0.6, alpha=0.7)
-    ax.legend(loc="upper left", frameon=False, labelcolor="#E2E8F0", fontsize=10, ncol=3)
-    fig.tight_layout(pad=0.6)
+    axes_img = _render_fig(show_curves=False)
+    full_img = _render_fig(show_curves=True)
 
-    canvas = FigureCanvasAgg(fig)
-    buf = io.BytesIO()
-    canvas.print_png(buf)
-    buf.seek(0)
-    chart_img = Image.open(buf).convert("RGBA")
+    title_txt = f"MAIN EVENT: ${tk3}  |  16-BAR CONE & 14D ATR"
+    base_panel, _, card_box = _make_opaque_segment_canvas(title_txt, (0, 229, 255), fonts)
+    full_panel, _, _ = _make_opaque_segment_canvas(title_txt, (0, 229, 255), fonts)
 
-    # Wrap in obsidian HUD card
-    panel = Image.new("RGBA", (w_px, h_px), (8, 16, 28, 242))
-    draw = ImageDraw.Draw(panel)
-    draw.rounded_rectangle(
-        (0, 0, w_px - 1, h_px - 1),
-        radius=16,
-        fill=(8, 16, 28, 242),
-        outline=(0, 229, 255, 200),
-        width=2,
-    )
-    title_txt = f"MAIN EVENT: ${tk3}  |  20D PRICE • 14D ATR FLOOR • 16-BAR NEURAL CONE"
-    draw.text((20, 22), title_txt, font=fonts.bold(15), fill=(226, 244, 255), anchor="lm")
-    panel.paste(chart_img, (0, 40), chart_img)
+    paste_x, paste_y = card_box[0] + 12, card_box[1] + 50
+    base_panel.paste(axes_img, (paste_x, paste_y), axes_img)
+    full_panel.paste(full_img, (paste_x, paste_y), full_img)
+
+    plot_box = (paste_x + 48, paste_y + 10, paste_x + chart_w - 10, paste_y + chart_h - 24)
+    return base_panel.convert("RGB"), full_panel.convert("RGB"), plot_box
+
+
+def render_progressive_chart_frame(
+    base_panel: Image.Image,
+    full_panel: Image.Image,
+    plot_box: tuple[int, int, int, int],
+    progress: float,
+    haircut: bool,
+    fonts: HudFonts,
+) -> Image.Image:
+    """Renders 30fps progressive draw-in across 20D price, 14D ATR floor, and 16-BAR CONE."""
+    p = min(1.0, max(0.0, progress))
+    draw_frac = min(1.0, p / 0.88)
+    ease = 1.0 - (1.0 - draw_frac) ** 2
+
+    frame_panel = base_panel.copy()
+    x0, y0, x1, y1 = plot_box
+    scan_x = max(x0 + 2, min(x1, int(round(x0 + (x1 - x0) * ease))))
+    reveal_crop = full_panel.crop((x0, y0, scan_x, y1))
+    frame_panel.paste(reveal_crop, (x0, y0))
+
+    draw = ImageDraw.Draw(frame_panel)
+    if ease < 0.99:
+        cursor_col = (0, 229, 255) if ease < 0.54 else (16, 185, 129)
+        draw.line([(scan_x, y0 + 2), (scan_x, y1 - 2)], fill=cursor_col, width=2)
+        draw.ellipse((scan_x - 4, y0 + 6, scan_x + 4, y0 + 14), fill=(255, 255, 255))
+
+    # Header telemetry status pill (strictly inside safe zone <= 938 right border)
+    if ease < 0.54:
+        phase_txt = "DRAWING 20D PRICE + 14D ATR..."
+        pill_col = (0, 229, 255)
+    elif ease < 0.99:
+        phase_txt = "EXPANDING 16-BAR CONE..."
+        pill_col = (16, 185, 129)
+    else:
+        phase_txt = "16-BAR CONE LOCKED [-20% NULL]" if haircut else "16-BAR CONE LOCKED"
+        pill_col = (251, 191, 36) if haircut else (52, 211, 153)
+
+    draw.rounded_rectangle((632, 16, 926, 44), radius=7, fill=(15, 23, 42), outline=pill_col, width=1)
+    draw.text((779, 30), phase_txt, font=fonts.bold(12), fill=pill_col, anchor="mm")
+    return frame_panel
+
+
+def build_slot3_trajectory_chart(brief_data: dict[str, Any], fonts: HudFonts) -> Image.Image:
+    """Compatibility wrapper returning locked full opaque #0b111a trajectory chart panel."""
+    base_p, full_p, plot_b = build_progressive_trajectory_layers(brief_data, fonts)
+    haircut = bool(brief_data.get("t3", {}).get("haircut_applied", False))
+    return render_progressive_chart_frame(base_p, full_p, plot_b, 1.0, haircut, fonts).convert("RGBA")
+
+
+def build_trio_matrix_panel(brief_data: dict[str, Any], fonts: HudFonts) -> Image.Image:
+    """Renders side-by-side 3-ticker comparison matrix (08 velocity, 07 Z-score, 02 ATR stop)."""
+    title_txt = "TRIO MATRIX  |  AGENT 08 VELOCITY • 07 Z-SCORE • 02 ATR STOP"
+    panel, draw, card_box = _make_opaque_segment_canvas(title_txt, (56, 189, 248), fonts)
+
+    slots = [
+        ("SLOT #1 • RADAR", brief_data.get("t1", {}), (0, 229, 255)),
+        ("SLOT #2 • RADAR", brief_data.get("t2", {}), (52, 211, 153)),
+        ("SLOT #3 • MAIN", brief_data.get("t3", {}), (251, 191, 36)),
+    ]
+
+    inner_x0 = card_box[0] + 14
+    col_w = 290
+    gap = 10
+    top_y = card_box[1] + 54
+    bot_y = card_box[3] - 14
+
+    for idx, (badge_lbl, slot_d, accent) in enumerate(slots):
+        cx0 = inner_x0 + idx * (col_w + gap)
+        cx1 = cx0 + col_w
+        draw.rounded_rectangle(
+            (cx0, top_y, cx1, bot_y),
+            radius=12,
+            fill=(15, 23, 42, 255),
+            outline=(*accent, 190),
+            width=2 if idx == 2 else 1,
+        )
+        tk = f"${str(slot_d.get('ticker', f'T{idx+1}')).upper().lstrip('$')}"
+        spot = float(slot_d.get("spot_price") or 0.0)
+        vel = float(slot_d.get("forecast_return_pct") or 0.0)
+        z_val = float(slot_d.get("z_score_anomaly") or 0.0)
+        atr_stop = float(slot_d.get("dynamic_stop_2x_atr") or 0.0)
+        conv = float(slot_d.get("adjusted_confluence_score") or 0.0)
+
+        draw.text((cx0 + 16, top_y + 18), badge_lbl, font=fonts.bold(12), fill=accent, anchor="lm")
+        draw.text((cx0 + 16, top_y + 50), tk, font=fonts.bold(28), fill=(255, 255, 255), anchor="lm")
+        draw.text((cx1 - 16, top_y + 50), f"${spot:.2f}", font=fonts.mono(22), fill=(226, 244, 255), anchor="rm")
+        draw.line([(cx0 + 14, top_y + 78), (cx1 - 14, top_y + 78)], fill=(30, 41, 59), width=1)
+
+        metrics = [
+            ("08 VELOCITY", f"{vel:+6.2f}%", (52, 211, 153) if vel >= 0 else (248, 113, 113)),
+            ("07 Z-SCORE", f"{z_val:+6.2f}σ", (251, 191, 36) if abs(z_val) >= 2.0 else (203, 213, 225)),
+            ("02 ATR STOP", f"${atr_stop:>6.2f}", (248, 113, 113)),
+            ("CONVICTION", f"{conv:>5.1f}%", accent),
+        ]
+        for m_idx, (m_lbl, m_val, m_col) in enumerate(metrics):
+            my = top_y + 114 + m_idx * 56
+            draw.text((cx0 + 16, my), m_lbl, font=fonts.medium(13), fill=(148, 163, 184), anchor="lm")
+            draw.text((cx1 - 16, my), m_val, font=fonts.mono(18), fill=m_col, anchor="rm")
+
     return panel
+
+
+def build_catalyst_flow_panel(brief_data: dict[str, Any], fonts: HudFonts) -> Image.Image:
+    """Renders insider/institutional/news flow audit with explicit NULL blindspot markers."""
+    title_txt = "CATALYST & BLINDSPOT AUDIT  |  SEC FORM 4 • FINNHUB MSPR • -20% RULE"
+    panel, draw, card_box = _make_opaque_segment_canvas(title_txt, (251, 191, 36), fonts)
+
+    rows = [
+        ("SLOT #1", brief_data.get("t1", {})),
+        ("SLOT #2", brief_data.get("t2", {})),
+        ("MAIN EVENT", brief_data.get("t3", {})),
+    ]
+    rx0 = card_box[0] + 14
+    rx1 = card_box[2] - 14
+    start_y = card_box[1] + 54
+    row_h = 104
+    gap = 12
+
+    for idx, (slot_lbl, slot_d) in enumerate(rows):
+        ry0 = start_y + idx * (row_h + gap)
+        ry1 = ry0 + row_h
+        is_main = idx == 2
+        draw.rounded_rectangle(
+            (rx0, ry0, rx1, ry1),
+            radius=12,
+            fill=(15, 23, 42, 255),
+            outline=(251, 191, 36, 210) if is_main else (51, 65, 85, 200),
+            width=2 if is_main else 1,
+        )
+        tk = f"${str(slot_d.get('ticker', f'T{idx+1}')).upper().lstrip('$')}"
+        mspr = slot_d.get("finnhub_mspr")
+        sec_null = bool(slot_d.get("sec_form4_null", mspr is None))
+        haircut = bool(slot_d.get("haircut_applied", sec_null or mspr is None))
+        conv = float(slot_d.get("adjusted_confluence_score") or 0.0)
+        stop = float(slot_d.get("dynamic_stop_2x_atr") or 0.0)
+        bias = str(slot_d.get("net_quant_bias") or "NEUTRAL").replace("_", " ")
+
+        mspr_txt = "MSPR: NULL" if mspr is None else f"MSPR: {float(mspr):+.2f}"
+        sec_txt = "FORM 4: NULL" if sec_null else "FORM 4: ACTIVE"
+        penalty_txt = "BLINDSPOT [-20% PENALTY]" if haircut else "VERIFIED FLOW"
+        pen_col = (248, 113, 113) if haircut else (52, 211, 153)
+
+        draw.text((rx0 + 18, ry0 + 26), f"{slot_lbl}  •  {tk}", font=fonts.bold(20), fill=(255, 255, 255), anchor="lm")
+        draw.text((rx0 + 18, ry0 + 68), f"{sec_txt}   |   {mspr_txt}", font=fonts.mono(15), fill=(148, 163, 184), anchor="lm")
+        draw.text((rx1 - 18, ry0 + 26), penalty_txt, font=fonts.bold(15), fill=pen_col, anchor="rm")
+        draw.text(
+            (rx1 - 18, ry0 + 68),
+            f"{bias[:18]}  |  CONV {conv:.1f}%  |  STOP ${stop:.2f}",
+            font=fonts.mono(14),
+            fill=(203, 213, 225),
+            anchor="rm",
+        )
+
+    return panel
+
+
+def build_rotating_segment_panel(brief_data: dict[str, Any], fonts: HudFonts) -> Image.Image:
+    """Selects middle rotating HUD segment (~16s-38s) by episode_num % 3."""
+    ep_id = int(brief_data.get("episode_id", 4))
+    mode = str(brief_data.get("rotation_mode") or ROTATING_MODES_MAP[ep_id % 3])
+    if mode == "trio_matrix":
+        return build_trio_matrix_panel(brief_data, fonts)
+    if mode == "catalyst_flow":
+        return build_catalyst_flow_panel(brief_data, fonts)
+    return build_slot3_trajectory_chart(brief_data, fonts)
 
 
 def build_ticker_assets(
@@ -1094,8 +1321,10 @@ def render_julie_eq_overlay(t_sec: float, rms: float, active: bool) -> Image.Ima
     return overlay
 
 
-def build_stage1_lower_card(brief_data: dict[str, Any], fonts: HudFonts) -> Image.Image:
-    """Pre-renders Option D Stage 1 lower panel: 8-Cluster Radar + Morning Watchtower."""
+def build_stage1_lower_card(
+    brief_data: dict[str, Any], fonts: HudFonts, active_slot: int = 1
+) -> Image.Image:
+    """Pre-renders Option D Stage 1 lower panel with dynamic per-slot active spotlight."""
     w = LOWER_PANEL_BOX[2] - LOWER_PANEL_BOX[0]  # 1044
     h = LOWER_PANEL_BOX[3] - LOWER_PANEL_BOX[1]  # 662
     panel = Image.new("RGB", (w, h), (6, 11, 20))
@@ -1124,13 +1353,14 @@ def build_stage1_lower_card(brief_data: dict[str, Any], fonts: HudFonts) -> Imag
         draw.rounded_rectangle((16, 62, 428, 394), radius=10, fill=(10, 22, 40), outline=(26, 82, 118))
 
     # Left footer metadata pills
-    t1 = brief_data.get("t1", {})
+    active_key = f"t{max(1, min(3, active_slot))}"
+    focus_asset = brief_data.get(active_key, brief_data.get("t1", {}))
     run_date_badge = str(brief_data.get("run_date_badge", "LIVE"))
     scan_ts = str(brief_data.get("morning_scan_timestamp", "")).split(" EST")[0]
     info_rows = [
         ("PORTFOLIO UNIVERSE", "40-ASSET MATRIX", (56, 189, 248)),
         ("RECON DATE", run_date_badge, (0, 229, 255)),
-        ("PRIMARY FOCUS", f"${t1.get('ticker', 'T1')}", (16, 185, 129)),
+        ("PRIMARY FOCUS", f"${focus_asset.get('ticker', 'T1')}", (251, 191, 36) if active_slot == 3 else (16, 185, 129)),
         ("LEDGER MODE", "SQLITE READ-ONLY", (148, 163, 184)),
     ]
     y_cursor = 414
@@ -1186,28 +1416,32 @@ def build_stage1_lower_card(brief_data: dict[str, Any], fonts: HudFonts) -> Imag
         bias = str(asset.get("net_quant_bias", "Neutral"))
         haircut = bool(asset.get("haircut_applied", False))
 
-        is_primary = idx == 1
-        card_fill = (12, 26, 48) if is_primary else (10, 20, 38)
-        card_outline = (0, 229, 255) if is_primary else (26, 74, 108)
+        is_primary = (idx == active_slot)
+        accent_col = (251, 191, 36) if idx == 3 else (0, 229, 255)
+        card_fill = (15, 34, 62) if is_primary else (8, 14, 26)
+        card_outline = accent_col if is_primary else (20, 48, 72)
         cx0, cy0, cx1, cy1 = rx0 + 16, card_y, w - 17, card_y + card_h
 
         draw.rounded_rectangle(
-            (cx0, cy0, cx1, cy1), radius=12, fill=card_fill, outline=card_outline, width=2 if is_primary else 1
+            (cx0, cy0, cx1, cy1), radius=12, fill=card_fill, outline=card_outline, width=3 if is_primary else 1
         )
-        draw.rectangle((cx0, cy0 + 14, cx0 + 5, cy1 - 14), fill=(0, 229, 255) if is_primary else (56, 189, 248))
+        draw.rectangle(
+            (cx0, cy0 + 14, cx0 + (7 if is_primary else 4), cy1 - 14),
+            fill=accent_col if is_primary else (36, 76, 108),
+        )
 
-        # Row 1 inside asset card: Rank + Ticker + Company + Confluence Pill
+        # Row 1 inside asset card: Rank + Ticker + LIVE AUDIT Pill / Company + Confluence Pill
         rank_txt = f"T{idx}"
         draw.rounded_rectangle(
             (cx0 + 16, cy0 + 14, cx0 + 62, cy0 + 44),
             radius=6,
-            fill=(0, 229, 255) if is_primary else (24, 52, 82),
+            fill=accent_col if is_primary else (20, 42, 68),
         )
         draw.text(
             (cx0 + 39, cy0 + 29),
             rank_txt,
             font=fonts.bold(16),
-            fill=(6, 14, 26) if is_primary else (196, 232, 255),
+            fill=(6, 14, 26) if is_primary else (148, 175, 200),
             anchor="mm",
         )
         ticker_label = f"${ticker}"
@@ -1216,26 +1450,44 @@ def build_stage1_lower_card(brief_data: dict[str, Any], fonts: HudFonts) -> Imag
             (cx0 + 74, cy0 + 29),
             ticker_label,
             font=ticker_font,
-            fill=(255, 255, 255),
+            fill=(255, 255, 255) if is_primary else (180, 198, 220),
             anchor="lm",
         )
         ticker_w = ticker_font.getbbox(ticker_label)[2]
-        comp_x = cx0 + 74 + ticker_w + 14
+        comp_x = cx0 + 74 + ticker_w + 12
+        if is_primary:
+            live_pill_w = 104
+            draw.rounded_rectangle(
+                (comp_x, cy0 + 17, comp_x + live_pill_w, cy0 + 41),
+                radius=6,
+                fill=(18, 52, 74) if idx != 3 else (64, 42, 10),
+                outline=accent_col,
+                width=1,
+            )
+            draw.text(
+                (comp_x + live_pill_w // 2, cy0 + 29),
+                "LIVE AUDIT",
+                font=fonts.bold(12),
+                fill=accent_col,
+                anchor="mm",
+            )
+            comp_x += live_pill_w + 10
         conf_label = f"CONF {conf:.2f}%" + (" [-20%]" if haircut else "")
         conf_col = (245, 158, 11) if haircut else ((0, 229, 255) if conf > 0 else (148, 163, 184))
         conf_w = fonts.mono(15).getbbox(conf_label)[2]
-        max_comp_w = max(40, (cx1 - 14 - conf_w - 12) - comp_x)
+        max_comp_w = max(32, (cx1 - 14 - conf_w - 12) - comp_x)
         comp_txt = company.upper()
         comp_font = fonts.medium(14)
         while len(comp_txt) > 3 and comp_font.getbbox(comp_txt)[2] > max_comp_w:
             comp_txt = comp_txt[:-2] + "…"
-        draw.text(
-            (comp_x, cy0 + 30),
-            comp_txt,
-            font=comp_font,
-            fill=(148, 175, 205),
-            anchor="lm",
-        )
+        if max_comp_w >= 48:
+            draw.text(
+                (comp_x, cy0 + 30),
+                comp_txt,
+                font=comp_font,
+                fill=(196, 222, 248) if is_primary else (118, 145, 175),
+                anchor="lm",
+            )
 
         draw.text((cx1 - 14, cy0 + 29), conf_label, font=fonts.mono(15), fill=conf_col, anchor="rm")
 
@@ -1291,11 +1543,15 @@ def build_stage1_lower_card(brief_data: dict[str, Any], fonts: HudFonts) -> Imag
 def build_stage2_rows_and_shell(
     brief_data: dict[str, Any], fonts: HudFonts
 ) -> tuple[Image.Image, list[tuple[str, str, str, tuple[int, int, int]]]]:
-    """Pre-renders Option D Stage 2 cyber terminal shell and 7 deterministic T1 telemetry rows."""
-    t1 = brief_data.get("t1", {})
-    ticker = str(t1.get("ticker", "T1"))
-    company = str(t1.get("company_name", ticker)).upper()
-    haircut = bool(t1.get("haircut_applied", False))
+    """Pre-renders Option D Stage 2 cyber terminal shell bound to Main Event (Slot #3)."""
+    t3 = brief_data.get("t3", brief_data.get("t1", {}))
+    ticker = str(t3.get("ticker", "T3"))
+    company = str(t3.get("company_name", ticker)).upper()
+    haircut = bool(
+        t3.get("haircut_applied", False)
+        or t3.get("sec_form4_null", False)
+        or (t3.get("finnhub_mspr") is None)
+    )
 
     w = LOWER_PANEL_BOX[2] - LOWER_PANEL_BOX[0]  # 1044
     h = LOWER_PANEL_BOX[3] - LOWER_PANEL_BOX[1]  # 662
@@ -1341,19 +1597,19 @@ def build_stage2_rows_and_shell(
     draw.text((430, 110), "QUANT READOUT", font=fonts.bold(14), fill=(110, 185, 225), anchor="lm")
     draw.text((w - 38, 110), "VERIFICATION", font=fonts.bold(14), fill=(110, 185, 225), anchor="rm")
 
-    spot_price = float(t1.get("spot_price", 0.0))
-    atr_14d = float(t1.get("atr_14d", 0.0))
-    atr_pct = float(t1.get("atr_14d_pct", 0.0))
-    stop_2x = float(t1.get("dynamic_stop_2x_atr", 0.0))
-    sma_20d = float(t1.get("sma_20d", 0.0))
-    target_5d = float(t1.get("model_target_5d", 0.0))
-    conf_score = float(t1.get("adjusted_confluence_score", 0.0))
-    net_bias = str(t1.get("net_quant_bias", "Neutral"))
-    align_str = str(t1.get("sma_20d_alignment", "")).lower()
+    spot_price = float(t3.get("spot_price", 0.0))
+    atr_14d = float(t3.get("atr_14d", 0.0))
+    atr_pct = float(t3.get("atr_14d_pct", 0.0))
+    stop_2x = float(t3.get("dynamic_stop_2x_atr", 0.0))
+    sma_20d = float(t3.get("sma_20d", 0.0))
+    target_16b = float(t3.get("model_target_5d", 0.0))
+    conf_score = float(t3.get("adjusted_confluence_score", 0.0))
+    net_bias = str(t3.get("net_quant_bias", "Neutral"))
+    align_str = str(t3.get("sma_20d_alignment", "")).lower()
     sma_tag = "BELOW 20D SMA" if "below" in align_str or spot_price < sma_20d else "ABOVE 20D SMA"
     sma_col = (251, 191, 36) if "BELOW" in sma_tag else (52, 211, 153)
 
-    target_src = str(t1.get("model_target_source", "chronos")).split(":")[-1].upper()
+    target_src = str(t3.get("model_target_source", "chronos")).split(":")[-1].upper()
     conf_tag = "HAIRCUT -20%" if haircut else "SEC/FINNHUB VERIFIED"
     conf_col = (245, 158, 11) if haircut else (0, 229, 255)
 
@@ -1370,7 +1626,7 @@ def build_stage2_rows_and_shell(
         ("02  14-DAY ATR", f"{_fmt_currency(atr_14d)} ({atr_pct:.2f}%)", "VOLATILITY BAND", (56, 189, 248)),
         ("03  DYNAMIC STOP (2X)", _fmt_currency(stop_2x), "RISK INVALIDATION", (251, 146, 60)),
         ("04  20-DAY SMA", _fmt_currency(sma_20d), sma_tag, sma_col),
-        ("05  5D CHRONOS TARGET", _fmt_currency(target_5d), f"MODEL // {target_src}", (167, 243, 208)),
+        ("05  16-BAR TARGET", _fmt_currency(target_16b), f"MODEL // {target_src}", (167, 243, 208)),
         ("06  CONFLUENCE SCORE", f"{conf_score:.2f}%", conf_tag, conf_col),
         ("07  NET QUANT BIAS", net_bias.upper(), "CHRONOS + SWARM", bias_col),
     ]
@@ -1576,15 +1832,28 @@ def render_final_video(
     subtitle_scrim = build_subtitle_scrim()
     julie_badge_s1 = build_julie_status_badge(1, hud_fonts)
     julie_badge_s2 = build_julie_status_badge(2, hud_fonts)
-    stage1_lower_card = build_stage1_lower_card(brief_data, hud_fonts)
+    stage1_card_s1 = build_stage1_lower_card(brief_data, hud_fonts, active_slot=1)
+    stage1_card_s2 = build_stage1_lower_card(brief_data, hud_fonts, active_slot=2)
+    stage1_card_s3 = build_stage1_lower_card(brief_data, hud_fonts, active_slot=3)
     stage2_shell, stage2_rows = build_stage2_rows_and_shell(brief_data, hud_fonts)
 
     ep_id = int(brief_data.get("episode_id", 2))
     t2_ticker = str(brief_data.get("t2", {}).get("ticker", "T2")).upper()
     t3_ticker = str(brief_data.get("t3", {}).get("ticker", "T3")).upper()
+    rotation_mode = str(brief_data.get("rotation_mode") or ROTATING_MODES_MAP[ep_id % 3])
+    haircut_t3 = bool(
+        brief_data.get("t3", {}).get("haircut_applied", False)
+        or brief_data.get("t3", {}).get("sec_form4_null", False)
+        or (brief_data.get("t3", {}).get("finnhub_mspr") is None)
+    )
     cover_pill_text = str(brief_data.get("cover_pill_text") or f"EPISODE #{ep_id:02d} | LIVE TRACK RECORD")
     frame0_cover_card = build_frame0_cover_card(t1_ticker, t2_ticker, t3_ticker, cover_pill_text, hud_fonts)
-    slot3_chart_panel = build_slot3_trajectory_chart(brief_data, hud_fonts)
+    if rotation_mode == "trajectory_chart":
+        chart_base_panel, chart_full_panel, chart_plot_box = build_progressive_trajectory_layers(brief_data, hud_fonts)
+        rotating_segment_panel = None
+    else:
+        chart_base_panel, chart_full_panel, chart_plot_box = None, None, (0, 0, 0, 0)
+        rotating_segment_panel = build_rotating_segment_panel(brief_data, hud_fonts).convert("RGB")
     banner_s1 = build_3stock_radar_banner(ep_id, t1_ticker, t2_ticker, t3_ticker, 1, hud_fonts)
     banner_s2 = build_3stock_radar_banner(ep_id, t1_ticker, t2_ticker, t3_ticker, 2, hud_fonts)
     banner_s3 = build_3stock_radar_banner(ep_id, t1_ticker, t2_ticker, t3_ticker, 3, hud_fonts)
@@ -1712,9 +1981,35 @@ def render_final_video(
                 (JULIE_EQ_BOX[0], JULIE_EQ_BOX[1]),
             )
 
-            # Layer 4: Option D 2-stage lower panel (strictly below subtitles)
-            if not active_julie:
-                frame.paste(stage1_lower_card, (LOWER_PANEL_BOX[0], LOWER_PANEL_BOX[1]))
+            # Layer 4: Active Slot Spotlight, Smooth Transitions & Progressive 14s Chart Draw-In
+            if t_sec < 10.5:
+                lower_out = stage1_card_s1
+            elif t_sec < 11.0:
+                lower_out = blend_panel_transition(stage1_card_s1, stage1_card_s2, (t_sec - 10.5) / 0.5, (0, 229, 255))
+            elif t_sec < 16.0:
+                lower_out = stage1_card_s2
+            elif t_sec < 16.5:
+                lower_out = blend_panel_transition(stage1_card_s2, stage1_card_s3, (t_sec - 16.0) / 0.5, (251, 191, 36))
+            elif t_sec < 18.0:
+                lower_out = stage1_card_s3
+            elif 18.0 <= t_sec <= 32.0:
+                if rotation_mode == "trajectory_chart" and chart_base_panel is not None and chart_full_panel is not None:
+                    chart_prog = (t_sec - 18.0) / 14.0
+                    mid_panel = render_progressive_chart_frame(
+                        chart_base_panel, chart_full_panel, chart_plot_box, chart_prog, haircut_t3, hud_fonts
+                    )
+                else:
+                    assert rotating_segment_panel is not None
+                    mid_panel = rotating_segment_panel
+
+                if t_sec < 18.45:
+                    lower_out = blend_panel_transition(stage1_card_s3, mid_panel, (t_sec - 18.0) / 0.45, (0, 229, 255))
+                elif t_sec > 31.55:
+                    lower_out = blend_panel_transition(mid_panel, stage1_card_s3, (t_sec - 31.55) / 0.45, (251, 191, 36))
+                else:
+                    lower_out = mid_panel
+            elif not active_julie:
+                lower_out = stage1_card_s3
             else:
                 elapsed_s2 = t_sec - julie_start_sec
                 elapsed_type = max(0.0, elapsed_s2 - STAGE2_SWEEP_DURATION_SEC)
@@ -1744,7 +2039,7 @@ def render_final_video(
                 if elapsed_s2 < STAGE2_SWEEP_DURATION_SEC:
                     sweep_frac = min(1.0, max(0.0, elapsed_s2 / STAGE2_SWEEP_DURATION_SEC))
                     scan_x = max(1, min(lower_w - 1, int(lower_w * sweep_frac)))
-                    blend = stage1_lower_card.copy()
+                    blend = stage1_card_s3.copy()
                     blend.paste(stage2_panel.crop((0, 0, scan_x, lower_h)), (0, 0))
                     draw_beam = ImageDraw.Draw(blend)
                     beam_x0 = max(0, scan_x - 10)
@@ -1754,15 +2049,11 @@ def render_final_video(
                         (max(0, scan_x - 2), 0, min(lower_w - 1, scan_x + 1), lower_h - 1),
                         fill=(235, 253, 255),
                     )
-                    frame.paste(blend, (LOWER_PANEL_BOX[0], LOWER_PANEL_BOX[1]))
+                    lower_out = blend
                 else:
-                    frame.paste(stage2_panel, (LOWER_PANEL_BOX[0], LOWER_PANEL_BOX[1]))
+                    lower_out = stage2_panel
 
-            # Layer 4B: 14-Second Live Trajectory Sparkline (18.0s - 32.0s ONLY)
-            if 18.0 <= t_sec <= 32.0:
-                chart_bg = frame.crop((40, 1136, 40 + slot3_chart_panel.width, 1136 + slot3_chart_panel.height)).convert("RGBA")
-                chart_comp = Image.alpha_composite(chart_bg, slot3_chart_panel).convert("RGB")
-                frame.paste(chart_comp, (40, 1136))
+            frame.paste(lower_out, (LOWER_PANEL_BOX[0], LOWER_PANEL_BOX[1]))
 
             # Layer 5: Burned-in captions over darkened subtitle deck (860..1120)
             if card_idx < num_cards and cards[card_idx].start <= t_sec <= cards[card_idx].end:
@@ -1770,7 +2061,7 @@ def render_final_video(
                 composited = Image.alpha_composite(band_bg, card_bands[card_idx]).convert("RGB")
                 frame.paste(composited, (0, BAND_Y_TOP_PX))
 
-            # Layer 6: Frame-0 3-Ticker Cover Card (0.0s - 3.5s) -> Docked 3-Stock Radar Banner (>= 3.5s)
+            # Layer 6: Frame-0 3-Ticker Cover Card (0.0s - 3.5s) -> Cross-Faded Active Radar Banner (>= 3.5s)
             if t_sec < 3.5:
                 if t_sec < 2.8:
                     cx, cy, cw, ch = 60, 420, 880, 260
@@ -1786,13 +2077,31 @@ def render_final_video(
                 cover_bg = frame.crop((cx, cy, cx + cw, cy + ch)).convert("RGBA")
                 frame.paste(Image.alpha_composite(cover_bg, cover_img).convert("RGB"), (cx, cy))
             else:
-                if t_sec < 11.0:
+                if t_sec < 10.5:
                     active_banner = banner_s1
-                elif t_sec < julie_start_sec:
+                    slot_pulse_col = (0, 229, 255)
+                elif t_sec < 11.0:
+                    active_banner = Image.blend(banner_s1, banner_s2, (t_sec - 10.5) / 0.5)
+                    slot_pulse_col = (0, 229, 255)
+                elif t_sec < 16.0:
                     active_banner = banner_s2
+                    slot_pulse_col = (0, 229, 255)
+                elif t_sec < 16.5:
+                    active_banner = Image.blend(banner_s2, banner_s3, (t_sec - 16.0) / 0.5)
+                    slot_pulse_col = (251, 191, 36)
                 else:
                     active_banner = banner_s3
-                frame.paste(active_banner.convert("RGB"), (RADAR_BANNER_BOX[0], RADAR_BANNER_BOX[1]))
+                    slot_pulse_col = (251, 191, 36)
+                banner_rgb = active_banner.convert("RGB")
+                if rms > 0.35:
+                    draw_ban = ImageDraw.Draw(banner_rgb)
+                    draw_ban.rounded_rectangle(
+                        (0, 0, banner_rgb.width - 1, banner_rgb.height - 1),
+                        radius=12,
+                        outline=slot_pulse_col,
+                        width=3,
+                    )
+                frame.paste(banner_rgb, (RADAR_BANNER_BOX[0], RADAR_BANNER_BOX[1]))
 
             # Layer 7: Permanent Bottom-Left Compliance Watermark (safe zone bottom >= 320px)
             frame.paste(compliance_watermark.convert("RGB"), (COMPLIANCE_WATERMARK_BOX[0], COMPLIANCE_WATERMARK_BOX[1]))
@@ -1883,7 +2192,7 @@ def render_verification_frame(
     banner = build_3stock_radar_banner(ep_id, t1_tk, t2_tk, t3_tk, slot, hud_fonts)
     frame.paste(banner.convert("RGB"), (RADAR_BANNER_BOX[0], RADAR_BANNER_BOX[1]))
 
-    stage1_lower = build_stage1_lower_card(brief_data, hud_fonts)
+    stage1_lower = build_stage1_lower_card(brief_data, hud_fonts, active_slot=slot)
     frame.paste(stage1_lower, (LOWER_PANEL_BOX[0], LOWER_PANEL_BOX[1]))
 
     watermark = build_compliance_watermark(hud_fonts)

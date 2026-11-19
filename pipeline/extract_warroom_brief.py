@@ -176,12 +176,14 @@ def build_ticker_brief(ticker: str, raw_data: dict[str, Any], owned: bool, slot_
     )
 
     sma_align = "trading above its 20-day moving average" if spot >= sma20 else "testing below its 20-day moving average"
-    haircut = bool(raw_data.get("data_opacity_penalty", False))
-    sec_cat = str(raw_data.get("sec_catalyst", "NONE"))
-    sec_null = "OPACITY" in sec_cat or "NONE" in sec_cat
-
+    sec_cat = str(raw_data.get("sec_catalyst") or "NULL").upper()
+    sec_null = ("OPACITY" in sec_cat) or ("NONE" in sec_cat) or ("NULL" in sec_cat)
     mspr = raw_data.get("finnhub_mspr")
-    conviction = float(raw_data.get("composite_conviction") or 60.0)
+    raw_haircut = bool(raw_data.get("data_opacity_penalty", False))
+    haircut = raw_haircut or sec_null or (mspr is None)
+    raw_conv = float(raw_data.get("composite_conviction") or 60.0)
+    # Apply mandatory 20% confidence penalty if NULL blindspot exists and not already penalized upstream
+    conviction = round(raw_conv * 0.80, 1) if (haircut and not raw_haircut) else round(raw_conv, 1)
     z_score = round(sma_delta / max(0.5, atr_pct), 2)
 
     return TickerBrief(
@@ -354,6 +356,43 @@ def export_radar_brief_json(trio: list[TickerBrief], out_path: Path = DEFAULT_BR
     ]
     hist_20d = load_20d_closes_ro(b3.ticker, b3.spot_price, b3.sma_20d, b3.atr_14d)
 
+    def _slot_dict(b: TickerBrief) -> dict[str, Any]:
+        return {
+            "ticker": b.ticker,
+            "company_name": b.company_name,
+            "spoken_name": b.spoken_name,
+            "spoken_short": b.spoken_short,
+            "owned": b.owned,
+            "spot_price": b.spot_price,
+            "atr_14d": b.atr_14d,
+            "atr_14d_pct": b.atr_14d_pct,
+            "dynamic_stop_2x_atr": b.dynamic_stop_2x_atr,
+            "sma_20d": b.sma_20d,
+            "sma_20d_delta_pct": b.sma_20d_delta_pct,
+            "sma_20d_alignment": b.sma_20d_alignment,
+            "model_target_5d": b.model_target_16b,
+            "forecast_return_pct": b.forecast_return_pct,
+            "model_target_source": "pierre_quant.db:16b_timesfm_chronos",
+            "net_quant_bias": b.directional_bias,
+            "consensus_bias_raw": b.directional_bias,
+            "z_score_anomaly": b.z_score_anomaly,
+            "sec_form4_null": b.sec_form4_null,
+            "finnhub_mspr": b.finnhub_mspr,
+            "haircut_applied": b.haircut_applied,
+            "adjusted_confluence_score": b.composite_conviction,
+        }
+
+    t3_payload = _slot_dict(b3)
+    t3_payload.update(
+        {
+            "has_model_clash": b3.has_model_clash,
+            "timesfm_bias": b3.timesfm_bias,
+            "chronos_bias": b3.chronos_bias,
+            "history_20d": hist_20d,
+            "trajectory_16b": traj_16b,
+        }
+    )
+
     # Map slot briefs to t1, t2, t3 for legacy pipeline consumers
     payload: dict[str, Any] = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -363,72 +402,9 @@ def export_radar_brief_json(trio: list[TickerBrief], out_path: Path = DEFAULT_BR
         "db_uri_mode": RO_DB_URI,
         "radar_tickers": [b.ticker for b in trio],
         "primary_main_ticker": b3.ticker,
-        "t1": {
-            "ticker": b1.ticker,
-            "company_name": b1.company_name,
-            "spoken_name": b1.spoken_name,
-            "spoken_short": b1.spoken_short,
-            "owned": b1.owned,
-            "spot_price": b1.spot_price,
-            "atr_14d": b1.atr_14d,
-            "atr_14d_pct": b1.atr_14d_pct,
-            "dynamic_stop_2x_atr": b1.dynamic_stop_2x_atr,
-            "sma_20d": b1.sma_20d,
-            "sma_20d_delta_pct": b1.sma_20d_delta_pct,
-            "sma_20d_alignment": b1.sma_20d_alignment,
-            "model_target_5d": b1.model_target_16b,
-            "model_target_source": "pierre_quant.db:16b_timesfm_chronos",
-            "net_quant_bias": b1.directional_bias,
-            "consensus_bias_raw": b1.directional_bias,
-            "haircut_applied": b1.haircut_applied,
-            "adjusted_confluence_score": b1.composite_conviction,
-        },
-        "t2": {
-            "ticker": b2.ticker,
-            "company_name": b2.company_name,
-            "spoken_name": b2.spoken_name,
-            "spoken_short": b2.spoken_short,
-            "owned": b2.owned,
-            "spot_price": b2.spot_price,
-            "atr_14d": b2.atr_14d,
-            "atr_14d_pct": b2.atr_14d_pct,
-            "dynamic_stop_2x_atr": b2.dynamic_stop_2x_atr,
-            "sma_20d": b2.sma_20d,
-            "sma_20d_delta_pct": b2.sma_20d_delta_pct,
-            "sma_20d_alignment": b2.sma_20d_alignment,
-            "model_target_5d": b2.model_target_16b,
-            "model_target_source": "pierre_quant.db:16b_timesfm_chronos",
-            "net_quant_bias": b2.directional_bias,
-            "consensus_bias_raw": b2.directional_bias,
-            "haircut_applied": b2.haircut_applied,
-            "adjusted_confluence_score": b2.composite_conviction,
-        },
-        "t3": {
-            "ticker": b3.ticker,
-            "company_name": b3.company_name,
-            "spoken_name": b3.spoken_name,
-            "spoken_short": b3.spoken_short,
-            "owned": b3.owned,
-            "spot_price": b3.spot_price,
-            "atr_14d": b3.atr_14d,
-            "atr_14d_pct": b3.atr_14d_pct,
-            "dynamic_stop_2x_atr": b3.dynamic_stop_2x_atr,
-            "sma_20d": b3.sma_20d,
-            "sma_20d_delta_pct": b3.sma_20d_delta_pct,
-            "sma_20d_alignment": b3.sma_20d_alignment,
-            "model_target_5d": b3.model_target_16b,
-            "model_target_source": "pierre_quant.db:16b_timesfm_chronos",
-            "net_quant_bias": b3.directional_bias,
-            "consensus_bias_raw": b3.directional_bias,
-            "haircut_applied": b3.haircut_applied,
-            "adjusted_confluence_score": b3.composite_conviction,
-            "has_model_clash": b3.has_model_clash,
-            "timesfm_bias": b3.timesfm_bias,
-            "chronos_bias": b3.chronos_bias,
-            "z_score_anomaly": b3.z_score_anomaly,
-            "history_20d": hist_20d,
-            "trajectory_16b": traj_16b,
-        },
+        "t1": _slot_dict(b1),
+        "t2": _slot_dict(b2),
+        "t3": t3_payload,
         "compliance_footer": "QUANT TELEMETRY LOG ONLY • NOT FINANCIAL ADVICE",
     }
 

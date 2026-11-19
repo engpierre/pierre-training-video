@@ -1,6 +1,6 @@
 # Project Checkpoint: `pierre-training-video`
 
-**Status:** Production Ready & Checkpointed (3-Stock Swarm Radar, Episodic Scorecard State Machine, and Automated Proton Mail Delivery Verified).
+**Status:** V2 Production Ready & Checkpointed (Animated HUD Spotlight Motion, Progressive `#0b111a` Trajectory Chart, Rotating Post-Opener Segments, `%`-Free FOMO Hook, 3-Day Cooldown, and Automated Proton Mail Delivery Verified).
 
 ---
 
@@ -20,11 +20,15 @@ python scripts\run_premarket_scan.py
 Set-Location 'C:\Anti-Gravity-Core\pierre-training-video'
 .\video_studio\.venv\Scripts\python.exe pipeline\run_daily_tiktok.py --upload-mode email
 ```
-*Executes the full automated pipeline:*
-1. **Fresh Swarm Ingestion (`extract_warroom_brief.py`):** Dynamically ranks the 40-asset universe from `premarket_recon_output.json` to select Slots #1 & #2 (Rapid Radar momentum setups) and Slot #3 (The Main Event anomaly/tension setup).
-2. **Ping-Pong Scripting (`generate_script.py`):** Generates 3-beat dialogue under the `57.5s` ceiling, grades prior episode's call, validates against compliance lexicon, and creates 4-line SEO caption.
-3. **Dual-Voice TTS Synthesis (`audio_builder.py`):** Neural audio generation on GPU 1 with EBU R128 loudness normalization (-14 to -16 LUFS) and guaranteed server teardown.
-4. **Broadcast HUD Rendering (`render_video.py`):** Renders vertical 1080x1920 video with Frame-0 3-Stock Radar Banner, active ticker highlight pill, and permanent bottom-left compliance watermark.
+*Executes the full automated V2 pipeline:*
+1. **Fresh Swarm Ingestion, 3-Day Cooldown & `-20%` Opacity Penalty (`extract_warroom_brief.py`):** Dynamically ranks the 40-asset universe from `premarket_recon_output.json` to select Slots #1 & #2 (Rapid Radar momentum setups) and Slot #3 (The Main Event anomaly/tension setup). Excludes tickers featured in the last 2 episodes unless overridden by an active `14D ATR` invalidation breach, and enforces a mandatory `-20%` confidence reduction when SEC Form 4 or Finnhub MSPR fields are `NULL`.
+2. **Percentage-Free FOMO Opener & Rotating Segments (`generate_script.py`):** Generates dialogue well under the `57.5s` ceiling (`~141` words), opens with a percentage-free 3-state FOMO hook (`TARGET_HIT`, `ON_TRACK`, `STOPPED_OUT`), rotates middle segments by `episode_num % 3` (`catalyst_flow`, `trajectory_chart`, `trio_matrix`), validates against the compliance lexicon, and creates a 4-line SEO caption.
+3. **Dual-Voice TTS Synthesis (`audio_builder.py`):** Neural audio generation on GPU 1 (`atempo=1.0400x` natural unhurried pacing) with EBU R128 loudness normalization (`~-15.5 dB`) and guaranteed server teardown.
+4. **Broadcast V2 HUD Rendering (`render_video.py`):** Renders vertical `1080x1920` video with:
+   - **Frame-0 3-Ticker Cover Card (`0.0s–3.5s`):** Centered `$T1 • $T2 • $T3` card + percentage-free status pill docking smoothly into the top radar banner at `3.5s`.
+   - **Active Speaker Turn Motion:** Cross-fades the top radar banner with RMS-reactive border pulsing and highlights the active slot card (`LIVE AUDIT`) across `Pierre` and `Julie` turns via smooth scanline wipes.
+   - **Rotating Opaque `#0b111a` Middle Segments (`18.0s–32.0s`):** Renders progressive 30fps draw-in of the `20D PRICE` cyan line, Agent 02 `14D ATR` dashed red floor, and `16-BAR CONE` (`trajectory_chart`), or switches cleanly to `trio_matrix` / `catalyst_flow` by `episode_num % 3` with zero HUD bleed-through.
+   - Permanent bottom-left compliance watermark inside safe zones (`top >= 140px`, `bottom >= 320px`, `right >= 120px`).
 5. **Episodic Ledger Lock (`episode_tracker.py`):** Automatically logs the 3-stock call into `pipeline/episode_ledger.json`.
 6. **Proton Mail Dispatch (`email_tiktok_package.py`):** Transmits MP4 video and caption directly to `engpierre5@gmail.com`.
 
@@ -44,7 +48,7 @@ Set-Location 'C:\Anti-Gravity-Core\pierre-training-video'
 
 - **Ledger Storage:** `pipeline/episode_ledger.json` persists every recorded episode, entry spot, 14D ATR stop, 16-bar target, and directional bias.
 - **Deterministic Grading:** `grade_previous_episode()` checks current market prices (via `pierre_quant.db ?mode=ro` or Yahoo chart API v8 fallback), computes exact delta percentage, and outputs spoken receipts and HUD badges.
-- **Production Seed:** Cleanly seeded with **Episode #01** (`BTC-USD` baseline) so the next live morning run registers as **Episode #02**.
+- **Production State:** Cleanly holds **Episodes #01–#03** (`episode_ledger.json`) so the next live morning run registers as **Episode #04**.
 
 ---
 
