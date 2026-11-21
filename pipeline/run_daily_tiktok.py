@@ -46,6 +46,7 @@ QUANT_READER_SCRIPT = PIPELINE_DIR / "quant_reader.py"
 EXTRACT_BRIEF_SCRIPT = PIPELINE_DIR / "extract_warroom_brief.py"
 GENERATE_SCRIPT_SCRIPT = PIPELINE_DIR / "generate_script.py"
 AUDIO_BUILDER_SCRIPT = PIPELINE_DIR / "audio_builder.py"
+AVATAR_SYNC_SCRIPT = PIPELINE_DIR / "avatar_sync.py"
 RENDER_VIDEO_SCRIPT = PIPELINE_DIR / "render_video.py"
 TIKTOK_UPLOAD_SCRIPT = PIPELINE_DIR / "tiktok_upload.py"
 EMAIL_AGENT_PYTHON = Path(r"C:\Anti-Gravity-Core\pierres_email_agent\.venv\Scripts\python.exe")
@@ -182,6 +183,7 @@ def run_pipeline(
     upload_mode: str,
     rebuild_bg: bool,
     dry_run: bool = False,
+    no_avatar: bool = False,
 ) -> PipelineRunSummary:
     """Executes all Phase 1-5 stages cleanly and writes pipeline_run_summary.json."""
     if not PYTHON_BIN.exists():
@@ -241,6 +243,30 @@ def run_pipeline(
         finally:
             stopped_pids.extend(stop_voice_studio_server())
 
+        # 3.5. Phase 3.5 Speech-Synced Avatar Lip-Sync (GPU 1 MuseTalk)
+        avatar_mp4 = OUTPUT_DIR / "pierre_avatar_synced.mp4"
+        if not no_avatar and AVATAR_SYNC_SCRIPT.exists():
+            av_cmd = [
+                str(PYTHON_BIN),
+                str(AVATAR_SYNC_SCRIPT),
+                "--audio",
+                str(OUTPUT_DIR / "master_dialogue.wav"),
+                "--output",
+                str(avatar_mp4),
+            ]
+            try:
+                stage_timings["avatar_sync"] = _run_stage(
+                    "avatar_sync", av_cmd, stage_env, timeout_sec=300
+                )
+            except Exception as e:
+                print(f"[orchestrator] WARNING: avatar_sync failed ({e}), proceeding without avatar", flush=True)
+                stage_timings["avatar_sync"] = 0.0
+                if avatar_mp4.exists():
+                    avatar_mp4.unlink()
+        else:
+            stage_timings["avatar_sync"] = 0.0
+            print("[orchestrator] --- Stage: avatar_sync skipped", flush=True)
+
         # 4. Phase 4 Video & Option A/D HUD Compositor (GPU 1 Whisper)
         rv_cmd = [
             str(PYTHON_BIN),
@@ -248,6 +274,11 @@ def run_pipeline(
             "--bgm-volume",
             f"{bgm_volume:.4f}",
         ]
+        if no_avatar or not avatar_mp4.exists():
+            rv_cmd.append("--no-avatar")
+        else:
+            rv_cmd.extend(["--avatar-video", str(avatar_mp4)])
+
         stage_timings["render_video"] = _run_stage(
             "render_video", rv_cmd, stage_env, timeout_sec=300
         )
@@ -271,6 +302,8 @@ def run_pipeline(
             btc_copy = OUTPUT_DIR / "tiktok_ready_btc.mp4"
             shutil.copy2(main_mp4, btc_copy)
             output_paths["tiktok_ready_btc_mp4"] = str(btc_copy)
+        if avatar_mp4.exists():
+            output_paths["pierre_avatar_mp4"] = str(avatar_mp4)
 
         # 5. Phase 5B TikTok Packager / Publisher & Optional Proton Email Dispatch
         tu_mode = "package-only" if upload_mode == "email" else upload_mode
@@ -438,6 +471,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Preview pipeline run without mutating the ledger or external services.",
     )
+    parser.add_argument(
+        "--no-avatar",
+        action="store_true",
+        help="Disable MuseTalk speech-synced Pierre avatar overlay.",
+    )
     return parser.parse_args(argv)
 
 
@@ -452,6 +490,7 @@ def main(argv: list[str] | None = None) -> int:
         upload_mode=str(args.upload_mode),
         rebuild_bg=bool(args.rebuild_bg),
         dry_run=bool(args.dry_run),
+        no_avatar=bool(args.no_avatar),
     )
     gpu1_mib = summary.gpu_cleanup_status.get("gpus", {}).get("gpu1", {}).get("memory_used_mib", "?")
     gpu0_mib = summary.gpu_cleanup_status.get("gpus", {}).get("gpu0", {}).get("memory_used_mib", "?")

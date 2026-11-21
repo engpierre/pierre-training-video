@@ -88,6 +88,17 @@ WHISPER_MODEL_ID = "Systran/faster-whisper-base"
 WHISPER_DEVICE = "cuda"
 WHISPER_COMPUTE_TYPE = "float16"
 
+AVATAR_OVERLAY_W = 360
+AVATAR_OVERLAY_H = 360
+AVATAR_OVERLAY_X = 580
+AVATAR_OVERLAY_Y = 1300
+DEFAULT_AVATAR_MATTE_PATH = (
+    Path(r"C:\Anti-Gravity-Core\training-video-studio\assets\avatar\avatar_base_9s_matte.mp4")
+)
+DEFAULT_AVATAR_VIDEO_PATH = (
+    PROJECT_ROOT / "pipeline" / "output" / "pierre_avatar_synced.mp4"
+)
+
 _DLL_HANDLES: list[Any] = []
 
 
@@ -171,6 +182,8 @@ class RenderManifest:
     run_date_badge: str
     t1_ticker: str
     julie_handoff_sec: float
+    avatar_enabled: bool = False
+    avatar_video_path: str | None = None
 
 
 def resolve_ffmpeg_tool(tool_name: str) -> str:
@@ -1781,6 +1794,9 @@ def render_final_video(
     bg_video_path: Path,
     output_dir: Path,
     bgm_volume: float,
+    avatar_video_path: Path | None = None,
+    avatar_matte_path: Path | None = None,
+    use_avatar: bool = True,
 ) -> RenderManifest:
     """Executes full Phase 4 subtitle alignment, Option A/D HUD compositing, and H.264 encode."""
     resolved_output = output_dir.resolve()
@@ -1808,6 +1824,32 @@ def render_final_video(
     brief_data, julie_start_sec, handoff_sec, part2_sec = load_hud_context(
         brief_path, audio_path, target_duration_sec
     )
+
+    resolved_avatar_video = avatar_video_path or (resolved_output / "pierre_avatar_synced.mp4")
+    resolved_avatar_matte = avatar_matte_path or DEFAULT_AVATAR_MATTE_PATH
+    avatar_active = (
+        use_avatar
+        and resolved_avatar_video is not None
+        and resolved_avatar_video.exists()
+        and resolved_avatar_matte is not None
+        and resolved_avatar_matte.exists()
+    )
+    if avatar_active:
+        print(
+            f"[render_video] Pierre lower-frame avatar overlay ACTIVE:\n"
+            f"  video={resolved_avatar_video}\n"
+            f"  matte={resolved_avatar_matte}\n"
+            f"  box=(x={AVATAR_OVERLAY_X}, y={AVATAR_OVERLAY_Y}, w={AVATAR_OVERLAY_W}, h={AVATAR_OVERLAY_H})\n"
+            f"  active_window=[1.000s .. {julie_start_sec:.3f}s]",
+            flush=True,
+        )
+    else:
+        print(
+            f"[render_video] Pierre avatar overlay INACTIVE "
+            f"(use_avatar={use_avatar}, video_exists={resolved_avatar_video.exists() if resolved_avatar_video else False})",
+            flush=True,
+        )
+
     run_date_badge = str(
         brief_data.get("run_date_badge")
         or datetime.now(ZoneInfo("America/Toronto")).strftime("%d %b %Y").upper()
@@ -1884,23 +1926,53 @@ def render_final_video(
         "-i",
         str(audio_path),
     ]
+    next_input_idx = 2
+    bgm_idx: int | None = None
     if bgm_track is not None:
-        cmd.extend(
-            [
-                "-stream_loop",
-                "-1",
-                "-i",
-                str(bgm_track),
-                "-filter_complex",
-                f"[2:a]volume={bgm_volume:.3f}[bgm];[1:a][bgm]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[outa]",
-                "-map",
-                "0:v:0",
-                "-map",
-                "[outa]",
-            ]
+        bgm_idx = next_input_idx
+        cmd.extend(["-stream_loop", "-1", "-i", str(bgm_track)])
+        next_input_idx += 1
+
+    av_idx: int | None = None
+    mt_idx: int | None = None
+    if avatar_active:
+        assert resolved_avatar_video is not None and resolved_avatar_matte is not None
+        av_idx = next_input_idx
+        cmd.extend(["-stream_loop", "-1", "-i", str(resolved_avatar_video)])
+        next_input_idx += 1
+        mt_idx = next_input_idx
+        cmd.extend(["-stream_loop", "-1", "-i", str(resolved_avatar_matte)])
+        next_input_idx += 1
+
+    filters: list[str] = []
+    map_v = "0:v:0"
+    map_a = "1:a:0"
+
+    if avatar_active:
+        assert av_idx is not None and mt_idx is not None
+        fade_out_st = max(1.0, julie_start_sec - 0.20)
+        v_filter = (
+            f"[{av_idx}:v]crop=ih:ih:(iw-ih)/2:0,scale={AVATAR_OVERLAY_W}:{AVATAR_OVERLAY_H},fps={TARGET_FPS},format=rgba[av];"
+            f"[{mt_idx}:v]crop=ih:ih:(iw-ih)/2:0,scale={AVATAR_OVERLAY_W}:{AVATAR_OVERLAY_H},fps={TARGET_FPS},format=gray[mt];"
+            f"[av][mt]alphamerge,format=yuva420p,"
+            f"fade=t=in:st=1.000:d=0.200:alpha=1,"
+            f"fade=t=out:st={fade_out_st:.3f}:d=0.200:alpha=1[fg];"
+            f"[0:v][fg]overlay=x={AVATAR_OVERLAY_X}:y={AVATAR_OVERLAY_Y}:enable='between(t,1.000,{julie_start_sec:.3f})'[vout]"
         )
-    else:
-        cmd.extend(["-map", "0:v:0", "-map", "1:a:0"])
+        filters.append(v_filter)
+        map_v = "[vout]"
+
+    if bgm_track is not None and bgm_idx is not None:
+        a_filter = (
+            f"[{bgm_idx}:a]volume={bgm_volume:.3f}[bgm];"
+            f"[1:a][bgm]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[outa]"
+        )
+        filters.append(a_filter)
+        map_a = "[outa]"
+
+    if filters:
+        cmd.extend(["-filter_complex", ";".join(filters)])
+    cmd.extend(["-map", map_v, "-map", map_a])
 
     cmd.extend(
         [
@@ -2152,6 +2224,8 @@ def render_final_video(
         run_date_badge=run_date_badge,
         t1_ticker=t1_ticker,
         julie_handoff_sec=round(julie_start_sec, 3),
+        avatar_enabled=avatar_active,
+        avatar_video_path=str(resolved_avatar_video) if avatar_active else None,
     )
     with manifest_path.open(mode="w", encoding="utf-8") as handle:
         json.dump(asdict(manifest), handle, indent=2, ensure_ascii=False)
@@ -2241,6 +2315,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=1,
         help="Active pill slot for test-frame (1, 2, or 3; default: 1).",
     )
+    parser.add_argument(
+        "--avatar-video",
+        type=Path,
+        default=None,
+        help="Path to lip-synced Pierre avatar MP4 (defaults to output_dir/pierre_avatar_synced.mp4).",
+    )
+    parser.add_argument(
+        "--avatar-matte",
+        type=Path,
+        default=None,
+        help="Path to Pierre avatar alpha matte MP4.",
+    )
+    parser.add_argument(
+        "--no-avatar",
+        action="store_true",
+        help="Disable Pierre avatar overlay compositing.",
+    )
     return parser.parse_args(argv)
 
 
@@ -2262,6 +2353,9 @@ def main(argv: list[str] | None = None) -> int:
         bg_video_path=args.bg_video.resolve(),
         output_dir=args.output_dir.resolve(),
         bgm_volume=max(0.0, float(args.bgm_volume)),
+        avatar_video_path=args.avatar_video.resolve() if args.avatar_video else None,
+        avatar_matte_path=args.avatar_matte.resolve() if args.avatar_matte else None,
+        use_avatar=not args.no_avatar,
     )
     print(f"[render_video] SRT: {manifest.srt_output_path} ({manifest.subtitle_card_count} cards)")
     print(

@@ -1,6 +1,6 @@
 # Project Checkpoint: `pierre-training-video`
 
-**Status:** V2 Production Ready & Checkpointed (Animated HUD Spotlight Motion, Progressive `#0b111a` Trajectory Chart, Rotating Post-Opener Segments, `%`-Free FOMO Hook, 3-Day Cooldown, and Automated Proton Mail Delivery Verified).
+**Status:** V2 Production Ready & Checkpointed (Animated HUD Spotlight Motion, Progressive `#0b111a` Trajectory Chart, Rotating Post-Opener Segments, `%`-Free FOMO Hook, 3-Day Cooldown, Automated Proton Mail Delivery, and Speech-Gated Lower-Third Pierre Avatar Overlay Verified).
 
 ---
 
@@ -66,3 +66,12 @@ Set-Location 'C:\Anti-Gravity-Core\pierre-training-video'
 - **Write Containment:** All video, audio, brief, and ledger writes remain strictly inside `C:\Anti-Gravity-Core\pierre-training-video\`.
 - **Untouched Subsystems:** `pierre_stock_warroom` (`:3888`), `.openclaw` daemons, `pierres_email_agent`, and `pierre_quant.db` remain strictly read-only.
 - **Hardware Isolation:** `GPU 0` (`cuda:0`) remains at `0 MiB` studio compute; `GPU 1` (`cuda:1`) returns to `0 MiB` immediately upon TTS/Whisper completion.
+
+---
+
+## 6. Speech-Gated Lower-Third Avatar Overlay (MuseTalk v1.5)
+
+- **Isolated Subprocess Engine (`pipeline/avatar_sync.py`):** Spawns MuseTalk v1.5 in `.venv_musetalk` pinned to `cuda:1` strictly **after** `tts_server.py` teardown, consuming pre-cached 9s latents and alpha matte from `training-video-studio`.
+- **Lower-Frame Safe-Zone Placement:** Composited at `(x=580, y=1300)` scaled ~2x (`360x360` px, `<= 640px` height cap) with `180px` headroom below the subtitle deck, preserving watchtower metrics and compliance watermark.
+- **Speech-Window Gating:** Hidden for the opening `1.0s` (`t < 1.0s`), active across Pierre's Part 1 dialogue (`1.0s <= t < t_julie_start`) with `0.20s` alpha fades, and hidden (`alpha = 0`) throughout Julie's Part 2 turn.
+- **CLI Override:** Pass `--no-avatar` to `run_daily_tiktok.py` or `render_video.py` to skip lip-sync generation and render without overlay.

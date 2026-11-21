@@ -1,7 +1,7 @@
 {
   "ledger_version": "1.0",
-  "last_updated_utc": "2026-11-18T10:22:19.592215+00:00",
-  "active_episode_id": 3,
+  "last_updated_utc": "2026-11-20T10:33:47.058443+00:00",
+  "active_episode_id": 5,
   "episodes": [
     {
       "episode_id": 1,
@@ -95,6 +95,84 @@
           "entry_spot": 17.55,
           "atr_stop": 12.88,
           "target_16bar": 13.6,
+          "directional_bias": "BEARISH_BREAKDOWN",
+          "role": "MAIN_AUDIT"
+        }
+      ],
+      "receipt_graded": null,
+      "status": "LOCKED"
+    },
+    {
+      "episode_id": 4,
+      "recorded_at_utc": "2026-11-19T11:05:51.955796+00:00",
+      "date_badge": "19 NOV 2026",
+      "primary_ticker": "IONQ",
+      "radar_tickers": [
+        "NEE",
+        "EW",
+        "IONQ"
+      ],
+      "calls": [
+        {
+          "ticker": "NEE",
+          "entry_spot": 84.78,
+          "atr_stop": 81.15,
+          "target_16bar": 89.33,
+          "directional_bias": "BULLISH_CONFLUENCE",
+          "role": "RADAR_1"
+        },
+        {
+          "ticker": "EW",
+          "entry_spot": 105.23,
+          "atr_stop": 98.06,
+          "target_16bar": 119.18,
+          "directional_bias": "BULLISH_CONFLUENCE",
+          "role": "RADAR_2"
+        },
+        {
+          "ticker": "IONQ",
+          "entry_spot": 23.48,
+          "atr_stop": 17.31,
+          "target_16bar": 18.36,
+          "directional_bias": "BEARISH_BREAKDOWN",
+          "role": "MAIN_AUDIT"
+        }
+      ],
+      "receipt_graded": null,
+      "status": "LOCKED"
+    },
+    {
+      "episode_id": 5,
+      "recorded_at_utc": "2026-11-20T10:33:47.058443+00:00",
+      "date_badge": "20 NOV 2026",
+      "primary_ticker": "JOBY",
+      "radar_tickers": [
+        "GEN",
+        "CELH",
+        "JOBY"
+      ],
+      "calls": [
+        {
+          "ticker": "GEN",
+          "entry_spot": 30.15,
+          "atr_stop": 28.11,
+          "target_16bar": 35.12,
+          "directional_bias": "BULLISH_CONFLUENCE",
+          "role": "RADAR_1"
+        },
+        {
+          "ticker": "CELH",
+          "entry_spot": 30.72,
+          "atr_stop": 27.11,
+          "target_16bar": 32.2,
+          "directional_bias": "BULLISH_CONFLUENCE",
+          "role": "RADAR_2"
+        },
+        {
+          "ticker": "JOBY",
+          "entry_spot": 3.93,
+          "atr_stop": 3.05,
+          "target_16bar": 3.34,
           "directional_bias": "BEARISH_BREAKDOWN",
           "role": "MAIN_AUDIT"
         }
